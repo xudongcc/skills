@@ -10,21 +10,17 @@
 pnpm dlx skills@latest add https://github.com/xudongcc/skills --skill <skill-name>
 ```
 
-例如，安装 `nest-boot-best-practices`：
+例如，安装 `openclaw-lark-send-message`：
 
 ```sh
-pnpm dlx skills@latest add https://github.com/xudongcc/skills --skill nest-boot-best-practices
+pnpm dlx skills@latest add https://github.com/xudongcc/skills --skill openclaw-lark-send-message
 ```
 
 ## Skills 列表
 
 | Skill | 描述 |
 | --- | --- |
-| [nest-boot-best-practices](skills/nest-boot-best-practices/) | 使用 `@nest-boot` 框架构建 NestJS 应用时的代码组织与架构规范 |
-| [nest-boot-bullmq](skills/nest-boot-bullmq/) | 使用 `nest-boot-bullmq` 实现类型安全的异步任务队列 |
-| [nest-boot-graphql](skills/nest-boot-graphql/) | 使用 `nest-boot-graphql` 构建 GraphQL API |
-| [nest-boot-logger](skills/nest-boot-logger/) | 使用 `nest-boot-logger` 实现结构化日志 |
-| [nest-boot-mikro-orm](skills/nest-boot-mikro-orm/) | 使用 `nest-boot-mikro-orm` 进行数据库操作的最佳实践 |
+| [openclaw-lark-send-message](skills/openclaw-lark-send-message/) | 发送飞书/Lark 消息、处理原生 @ 提及、查找用户或机器人 ID 及排查提及渲染问题 |
 
 ## 管理 Skills
 
