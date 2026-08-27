@@ -86,6 +86,7 @@ Tracks version progression in Improve mode. Located at workspace root.
 ## grading.json
 
 Output from the grader agent. Located at `<run-dir>/grading.json`.
+For Codex rubric grading, pass `references/grading.schema.json` to `codex exec --output-schema` so every run uses the exact structure below.
 
 ```json
 {
@@ -106,23 +107,6 @@ Output from the grader agent. Located at `<run-dir>/grading.json`.
     "failed": 1,
     "total": 3,
     "pass_rate": 0.67
-  },
-  "execution_metrics": {
-    "tool_calls": {
-      "Read": 5,
-      "Write": 2,
-      "Bash": 8
-    },
-    "total_tool_calls": 15,
-    "total_steps": 6,
-    "errors_encountered": 0,
-    "output_chars": 12450,
-    "transcript_chars": 3200
-  },
-  "timing": {
-    "executor_duration_seconds": 165.0,
-    "grader_duration_seconds": 26.0,
-    "total_duration_seconds": 191.0
   },
   "claims": [
     {
@@ -152,45 +136,57 @@ Output from the grader agent. Located at `<run-dir>/grading.json`.
 **Fields:**
 - `expectations[]`: Graded expectations with evidence
 - `summary`: Aggregate pass/fail counts
-- `execution_metrics`: Tool usage and output size (from executor's metrics.json)
-- `timing`: Wall clock timing (from timing.json)
 - `claims`: Extracted and verified claims from the output
 - `user_notes_summary`: Issues flagged by the executor
-- `eval_feedback`: (optional) Improvement suggestions for the evals, only present when the grader identifies issues worth raising
+- `eval_feedback`: Improvement suggestions for the evals. Use an empty `suggestions` array when there are none.
+
+Execution metrics and timing intentionally live in separate deterministic files. The aggregator reads `<run-dir>/outputs/metrics.json` and `<run-dir>/timing.json` directly instead of asking the rubric grader to reproduce those values.
 
 ---
 
 ## metrics.json
 
-Output from the executor agent. Located at `<run-dir>/outputs/metrics.json`.
+Deterministic metrics extracted from `codex exec --json` by `scripts/collect_codex_metrics.py`. Located at `<run-dir>/outputs/metrics.json`.
 
 ```json
 {
   "tool_calls": {
-    "Read": 5,
-    "Write": 2,
-    "Bash": 8,
-    "Edit": 1,
-    "Glob": 2,
-    "Grep": 0
+    "command_execution": 8,
+    "file_change": 2,
+    "mcp_tool_call": 1,
+    "web_search": 2
   },
-  "total_tool_calls": 18,
-  "total_steps": 6,
-  "files_created": ["filled_form.pdf", "field_values.json"],
+  "total_tool_calls": 13,
+  "total_steps": 20,
   "errors_encountered": 0,
-  "output_chars": 12450,
-  "transcript_chars": 3200
+  "transcript_chars": 3200,
+  "run_status": "completed",
+  "turns_completed": 1,
+  "turns_failed": 0,
+  "exit_code": 0,
+  "usage": {
+    "cached_input_tokens": 12000,
+    "input_tokens": 15000,
+    "output_tokens": 2500,
+    "reasoning_output_tokens": 900
+  },
+  "total_tokens": 17500
 }
 ```
 
 **Fields:**
-- `tool_calls`: Count per tool type
+- `tool_calls`: Count of completed Codex item events per tool-like item type
 - `total_tool_calls`: Sum of all tool calls
-- `total_steps`: Number of major execution steps
-- `files_created`: List of output files created
-- `errors_encountered`: Number of errors during execution
-- `output_chars`: Total character count of output files
-- `transcript_chars`: Character count of transcript
+- `total_steps`: Number of completed Codex items, including agent messages and reasoning
+- `errors_encountered`: Failed items plus `turn.failed` and `error` events
+- `transcript_chars`: Character count of completed agent messages
+- `run_status`: `completed`, `failed`, or `incomplete`; only completed runs may be graded and aggregated
+- `turns_completed` / `turns_failed`: Terminal Codex turn counts found in the trace
+- `exit_code`: Optional `codex exec` exit code supplied to the collector
+- `usage`: Numeric usage fields aggregated from `turn.completed` events
+- `total_tokens`: Reported total, or `input_tokens + output_tokens` when Codex does not emit a total
+
+Artifact-specific fields such as `files_created` or `output_chars` may be added by deterministic output inspection, but the JSONL collector does not guess them.
 
 ---
 
@@ -198,19 +194,22 @@ Output from the executor agent. Located at `<run-dir>/outputs/metrics.json`.
 
 Wall clock timing for a run. Located at `<run-dir>/timing.json`.
 
-**How to capture:** When a subagent task completes, the task notification includes `total_tokens` and `duration_ms`. Save these immediately — they are not persisted anywhere else and cannot be recovered after the fact.
+**How to capture:** Measure wall-clock duration around every run, then call `scripts/collect_codex_metrics.py`. It reads token counts from the `usage` object in `turn.completed`. Omit unavailable duration fields rather than recording fabricated zeroes.
 
 ```json
 {
   "total_tokens": 84852,
   "duration_ms": 23332,
   "total_duration_seconds": 23.3,
+  "run_status": "completed",
+  "exit_code": 0,
   "executor_start": "2026-01-15T10:30:00Z",
   "executor_end": "2026-01-15T10:32:45Z",
   "executor_duration_seconds": 165.0,
   "grader_start": "2026-01-15T10:32:46Z",
   "grader_end": "2026-01-15T10:33:12Z",
-  "grader_duration_seconds": 26.0
+  "grader_duration_seconds": 26.0,
+  "source": "codex-exec-jsonl"
 }
 ```
 
@@ -225,11 +224,15 @@ Output from Benchmark mode. Located at `benchmarks/<timestamp>/benchmark.json`.
   "metadata": {
     "skill_name": "pdf",
     "skill_path": "/path/to/pdf",
-    "executor_model": "claude-sonnet-4-20250514",
+    "executor_model": "model-used-for-execution",
     "analyzer_model": "most-capable-model",
     "timestamp": "2026-01-15T10:30:00Z",
     "evals_run": [1, 2, 3],
-    "runs_per_configuration": 3
+    "runs_per_configuration": 3,
+    "run_counts_by_configuration": {
+      "with_skill": {"1": 3, "2": 3, "3": 3},
+      "without_skill": {"1": 3, "2": 3, "3": 3}
+    }
   },
 
   "runs": [
@@ -290,7 +293,8 @@ Output from Benchmark mode. Located at `benchmarks/<timestamp>/benchmark.json`.
   - `skill_name`: Name of the skill
   - `timestamp`: When the benchmark was run
   - `evals_run`: List of eval names or IDs
-  - `runs_per_configuration`: Number of runs per config (e.g. 3)
+  - `runs_per_configuration`: Actual uniform run count, or a `varies (min-max)` label when counts differ
+  - `run_counts_by_configuration`: Exact observed count for every configuration/eval pair
 - `runs[]`: Individual run results
   - `eval_id`: Numeric eval identifier
   - `eval_name`: Human-readable eval name (used as section header in the viewer)

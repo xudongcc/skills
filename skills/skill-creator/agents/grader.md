@@ -12,17 +12,19 @@ You have two jobs: grade the outputs, and critique the evals themselves. A passi
 
 You receive these parameters in your prompt:
 
-- **expectations**: List of expectations to evaluate (strings)
-- **transcript_path**: Path to the execution transcript (markdown file)
+- **expectations_path**: Path to `eval_metadata.json`; grade its `assertions` array
+- **trace_path**: Path to the complete `codex exec --json` trace
+- **final_response_path**: Path to the executor's final response
 - **outputs_dir**: Directory containing output files from execution
+- **output_path**: Destination for `grading.json`, unless the caller uses `codex exec -o`
 
 ## Process
 
-### Step 1: Read the Transcript
+### Step 1: Read the Run Evidence
 
-1. Read the transcript file completely
-2. Note the eval prompt, execution steps, and final result
-3. Identify any issues or errors documented
+1. Read `expectations_path`, `trace_path`, and `final_response_path` completely
+2. Note the eval prompt, execution steps, tool results, final response, and any failed events
+3. Treat paths in the caller's prompt as authoritative; do not search for or mix in another run
 
 ### Step 2: Examine Output Files
 
@@ -78,9 +80,12 @@ Suggestions worth raising:
 
 Keep the bar high. The goal is to flag things the eval author would say "good catch" about, not to nitpick every assertion.
 
-### Step 7: Write Grading Results
+### Step 7: Read Executor Metrics and Timing
 
-Save results to `{outputs_dir}/../grading.json` (sibling to outputs_dir).
+1. If `{outputs_dir}/metrics.json` exists, use it as supporting context when evaluating process claims
+2. If `{outputs_dir}/../timing.json` exists, use it as supporting context for efficiency claims
+3. The caller should stop before grading when `run_status` is not `completed`. If invoked anyway, return an empty zero-total rubric and put the infrastructure problem in `user_notes_summary.needs_review`; do not issue expectation verdicts
+4. Do not copy either file into the rubric response. The benchmark aggregator reads these deterministic files directly and combines them with `grading.json`.
 
 ## Grading Criteria
 
@@ -98,10 +103,9 @@ Save results to `{outputs_dir}/../grading.json` (sibling to outputs_dir).
 
 **When uncertain**: The burden of proof to pass is on the expectation.
 
-### Step 8: Read Executor Metrics and Timing
+### Step 8: Write Grading Results
 
-1. If `{outputs_dir}/metrics.json` exists, read it and include in grading output
-2. If `{outputs_dir}/../timing.json` exists, read it and include timing data
+Return one JSON object matching `references/grading.schema.json`, without a Markdown code fence. Save it to `{output_path}` when the caller requests a file write. When the caller supplies `codex exec --output-schema ... -o {output_path}`, return the object as the final response and let the CLI write it.
 
 ## Output Format
 
@@ -123,7 +127,7 @@ Write a JSON file with this structure:
     {
       "text": "The assistant used the skill's OCR script",
       "passed": true,
-      "evidence": "Transcript Step 2 shows: 'Tool: Bash - python ocr_script.py image.png'"
+      "evidence": "Transcript Step 2 shows an exec_command call: 'python ocr_script.py image.png'"
     }
   ],
   "summary": {
@@ -131,23 +135,6 @@ Write a JSON file with this structure:
     "failed": 1,
     "total": 3,
     "pass_rate": 0.67
-  },
-  "execution_metrics": {
-    "tool_calls": {
-      "Read": 5,
-      "Write": 2,
-      "Bash": 8
-    },
-    "total_tool_calls": 15,
-    "total_steps": 6,
-    "errors_encountered": 0,
-    "output_chars": 12450,
-    "transcript_chars": 3200
-  },
-  "timing": {
-    "executor_duration_seconds": 165.0,
-    "grader_duration_seconds": 26.0,
-    "total_duration_seconds": 191.0
   },
   "claims": [
     {
@@ -175,6 +162,7 @@ Write a JSON file with this structure:
         "reason": "A hallucinated document that mentions the name would also pass — consider checking it appears as the primary contact with matching phone and email from the input"
       },
       {
+        "assertion": "",
         "reason": "No assertion checks whether the extracted phone numbers match the input — I observed incorrect numbers in the output that went uncaught"
       }
     ],
@@ -194,12 +182,6 @@ Write a JSON file with this structure:
   - **failed**: Count of failed expectations
   - **total**: Total expectations evaluated
   - **pass_rate**: Fraction passed (0.0 to 1.0)
-- **execution_metrics**: Copied from executor's metrics.json (if available)
-  - **output_chars**: Total character count of output files (proxy for tokens)
-  - **transcript_chars**: Character count of transcript
-- **timing**: Wall clock timing from timing.json (if available)
-  - **executor_duration_seconds**: Time spent in executor subagent
-  - **total_duration_seconds**: Total elapsed time for the run
 - **claims**: Extracted and verified claims from the output
   - **claim**: The statement being verified
   - **type**: "factual", "process", or "quality"
@@ -209,9 +191,9 @@ Write a JSON file with this structure:
   - **uncertainties**: Things the executor wasn't sure about
   - **needs_review**: Items requiring human attention
   - **workarounds**: Places where the skill didn't work as expected
-- **eval_feedback**: Improvement suggestions for the evals (only when warranted)
-  - **suggestions**: List of concrete suggestions, each with a `reason` and optionally an `assertion` it relates to
-  - **overall**: Brief assessment — can be "No suggestions, evals look solid" if nothing to flag
+- **eval_feedback**: Improvement suggestions for the evals
+  - **suggestions**: List of concrete suggestions, each with a `reason`; use an empty `assertion` string for suggestions that do not target one assertion
+  - **overall**: Brief assessment — use "No suggestions, evals look solid" when nothing needs changing
 
 ## Guidelines
 

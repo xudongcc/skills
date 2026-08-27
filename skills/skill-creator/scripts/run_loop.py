@@ -17,25 +17,34 @@ from pathlib import Path
 
 from scripts.generate_report import generate_html
 from scripts.improve_description import improve_description
-from scripts.run_eval import find_project_root, run_eval
+from scripts.run_eval import run_eval
 from scripts.utils import parse_skill_md
 
 
 def split_eval_set(eval_set: list[dict], holdout: float, seed: int = 42) -> tuple[list[dict], list[dict]]:
-    """Split eval set into train and test sets, stratified by should_trigger."""
-    random.seed(seed)
+    """Split evals while retaining training coverage for every polarity."""
+    if not 0 <= holdout < 1:
+        raise ValueError("holdout must be between 0 (inclusive) and 1 (exclusive)")
+
+    rng = random.Random(seed)
 
     # Separate by should_trigger
     trigger = [e for e in eval_set if e["should_trigger"]]
     no_trigger = [e for e in eval_set if not e["should_trigger"]]
 
     # Shuffle each group
-    random.shuffle(trigger)
-    random.shuffle(no_trigger)
+    rng.shuffle(trigger)
+    rng.shuffle(no_trigger)
 
-    # Calculate split points
-    n_trigger_test = max(1, int(len(trigger) * holdout))
-    n_no_trigger_test = max(1, int(len(no_trigger) * holdout))
+    # Keep at least one training item from every non-empty polarity. A polarity
+    # needs two examples before one can be held out.
+    def test_count(group: list[dict]) -> int:
+        if holdout == 0 or len(group) < 2:
+            return 0
+        return min(len(group) - 1, max(1, int(len(group) * holdout)))
+
+    n_trigger_test = test_count(trigger)
+    n_no_trigger_test = test_count(no_trigger)
 
     # Split
     test_set = trigger[:n_trigger_test] + no_trigger[:n_no_trigger_test]
@@ -60,7 +69,13 @@ def run_loop(
     log_dir: Path | None = None,
 ) -> dict:
     """Run the eval + improvement loop."""
-    project_root = find_project_root()
+    if not eval_set:
+        raise ValueError("eval_set must contain at least one query")
+    if max_iterations < 1:
+        raise ValueError("max_iterations must be at least 1")
+    if not 0 <= holdout < 1:
+        raise ValueError("holdout must be between 0 (inclusive) and 1 (exclusive)")
+
     name, original_description, content = parse_skill_md(skill_path)
     current_description = description_override or original_description
 
@@ -69,6 +84,12 @@ def run_loop(
         train_set, test_set = split_eval_set(eval_set, holdout)
         if verbose:
             print(f"Split: {len(train_set)} train, {len(test_set)} test (holdout={holdout})", file=sys.stderr)
+            if not test_set:
+                print(
+                    "Holdout disabled for this run because each polarity needs "
+                    "at least two examples before one can be held out.",
+                    file=sys.stderr,
+                )
     else:
         train_set = eval_set
         test_set = []
@@ -92,12 +113,31 @@ def run_loop(
             description=current_description,
             num_workers=num_workers,
             timeout=timeout,
-            project_root=project_root,
             runs_per_query=runs_per_query,
             trigger_threshold=trigger_threshold,
             model=model,
         )
         eval_elapsed = time.time() - t0
+
+        incomplete_queries = [
+            result for result in all_results["results"]
+            if result.get("status") != "completed"
+        ]
+        if incomplete_queries:
+            details = "; ".join(
+                (
+                    f"{result['query'][:60]}: status={result['status']}, "
+                    f"completed={result.get('runs', 0)}/"
+                    f"{result.get('expected_runs', '?')}, "
+                    f"error={result['errors'][0] if result.get('errors') else 'unknown'}"
+                )
+                for result in incomplete_queries
+            )
+            raise RuntimeError(
+                "Trigger evaluation did not complete every requested run for "
+                "one or more "
+                f"queries: {details}"
+            )
 
         # Split results back into train/test by matching queries
         train_queries_set = {q["query"] for q in train_set}
@@ -166,9 +206,13 @@ def run_loop(
                 accuracy = (tp + tn) / total if total > 0 else 0.0
                 print(f"{label}: {tp+tn}/{total} correct, precision={precision:.0%} recall={recall:.0%} accuracy={accuracy:.0%} ({elapsed:.1f}s)", file=sys.stderr)
                 for r in results:
-                    status = "PASS" if r["pass"] else "FAIL"
+                    if r.get("status") != "completed":
+                        status = r.get("status", "error").upper()
+                    else:
+                        status = "PASS" if r["pass"] else "FAIL"
                     rate_str = f"{r['triggers']}/{r['runs']}"
-                    print(f"  [{status}] rate={rate_str} expected={r['should_trigger']}: {r['query'][:60]}", file=sys.stderr)
+                    error_str = f" errors={r.get('error_count', 0)}" if r.get("error_count") else ""
+                    print(f"  [{status}] rate={rate_str}{error_str} expected={r['should_trigger']}: {r['query'][:60]}", file=sys.stderr)
 
             print_eval_stats("Train", train_results["results"], eval_elapsed)
             if test_summary:
@@ -247,7 +291,7 @@ def main():
     parser.add_argument("--skill-path", required=True, help="Path to skill directory")
     parser.add_argument("--description", default=None, help="Override starting description")
     parser.add_argument("--num-workers", type=int, default=10, help="Number of parallel workers")
-    parser.add_argument("--timeout", type=int, default=30, help="Timeout per query in seconds")
+    parser.add_argument("--timeout", type=int, default=120, help="Timeout per query in seconds")
     parser.add_argument("--max-iterations", type=int, default=5, help="Max improvement iterations")
     parser.add_argument("--runs-per-query", type=int, default=3, help="Number of runs per query")
     parser.add_argument("--trigger-threshold", type=float, default=0.5, help="Trigger rate threshold")

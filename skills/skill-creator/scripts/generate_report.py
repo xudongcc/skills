@@ -113,6 +113,7 @@ def generate_html(data: dict, auto_refresh: bool = False, skill_name: str = "") 
         }
         .pass { color: #788c5d; }
         .fail { color: #c44; }
+        .error { color: #d97706; }
         .rate {
             font-size: 9px;
             color: #b0aea5;
@@ -148,7 +149,7 @@ def generate_html(data: dict, auto_refresh: bool = False, skill_name: str = "") 
 <body>
     <h1>""" + title_prefix + """Skill Description Optimization</h1>
     <div class="explainer">
-        <strong>Optimizing your skill's description.</strong> This page updates automatically as Claude tests different versions of your skill's description. Each row is an iteration — a new description attempt. The columns show test queries: green checkmarks mean the skill triggered correctly (or correctly didn't trigger), red crosses mean it got it wrong. The "Train" score shows performance on queries used to improve the description; the "Test" score shows performance on held-out queries the optimizer hasn't seen. When it's done, Claude will apply the best-performing description to your skill.
+        <strong>Optimizing your skill's description.</strong> This page updates automatically as Codex tests different versions of your skill's description. Each row is an iteration — a new description attempt. The columns show test queries: green checkmarks mean the skill triggered correctly (or correctly didn't trigger), red crosses mean it got it wrong. The "Train" score shows performance on queries used to improve the description; the "Test" score shows performance on held-out queries the optimizer hasn't seen. When it's done, Codex will apply the best-performing description to your skill.
     </div>
 """]
 
@@ -269,10 +270,19 @@ def generate_html(data: dict, auto_refresh: bool = False, skill_name: str = "") 
             triggers = r.get("triggers", 0)
             runs = r.get("runs", 0)
 
-            icon = "✓" if did_pass else "✗"
-            css_class = "pass" if did_pass else "fail"
+            if r.get("status", "completed") != "completed":
+                icon = "⚠"
+                css_class = "error"
+                rate = (
+                    f"{r.get('runs', 0)}/{r.get('expected_runs', '?')} valid, "
+                    f"{r.get('error_count', 0)} err"
+                )
+            else:
+                icon = "✓" if did_pass else "✗"
+                css_class = "pass" if did_pass else "fail"
+                rate = f"{triggers}/{runs}"
 
-            html_parts.append(f'                <td class="result {css_class}">{icon}<span class="rate">{triggers}/{runs}</span></td>\n')
+            html_parts.append(f'                <td class="result {css_class}">{icon}<span class="rate">{rate}</span></td>\n')
 
         # Add result for each test query (with different background)
         for qinfo in test_queries:
@@ -281,10 +291,19 @@ def generate_html(data: dict, auto_refresh: bool = False, skill_name: str = "") 
             triggers = r.get("triggers", 0)
             runs = r.get("runs", 0)
 
-            icon = "✓" if did_pass else "✗"
-            css_class = "pass" if did_pass else "fail"
+            if r.get("status", "completed") != "completed":
+                icon = "⚠"
+                css_class = "error"
+                rate = (
+                    f"{r.get('runs', 0)}/{r.get('expected_runs', '?')} valid, "
+                    f"{r.get('error_count', 0)} err"
+                )
+            else:
+                icon = "✓" if did_pass else "✗"
+                css_class = "pass" if did_pass else "fail"
+                rate = f"{triggers}/{runs}"
 
-            html_parts.append(f'                <td class="result test-result {css_class}">{icon}<span class="rate">{triggers}/{runs}</span></td>\n')
+            html_parts.append(f'                <td class="result test-result {css_class}">{icon}<span class="rate">{rate}</span></td>\n')
 
         html_parts.append("            </tr>\n")
 

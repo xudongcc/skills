@@ -82,22 +82,38 @@ def _find_runs_recursive(root: Path, current: Path, runs: list[dict]) -> None:
             _find_runs_recursive(root, child, runs)
 
 
+def find_nearest_file(start: Path, root: Path, filename: str) -> Path | None:
+    """Find the closest ancestor file without walking above the workspace."""
+    current = start
+    while True:
+        candidate = current / filename
+        if candidate.is_file():
+            return candidate
+        if current == root:
+            return None
+        try:
+            current.relative_to(root)
+        except ValueError:
+            return None
+        current = current.parent
+
+
 def build_run(root: Path, run_dir: Path) -> dict | None:
     """Build a run dict with prompt, outputs, and grading data."""
     prompt = ""
     eval_id = None
 
-    # Try eval_metadata.json
-    for candidate in [run_dir / "eval_metadata.json", run_dir.parent / "eval_metadata.json"]:
-        if candidate.exists():
-            try:
-                metadata = json.loads(candidate.read_text())
-                prompt = metadata.get("prompt", "")
-                eval_id = metadata.get("eval_id")
-            except (json.JSONDecodeError, OSError):
-                pass
-            if prompt:
-                break
+    # The canonical layout is eval/config/run-N, but legacy workspaces may put
+    # outputs directly under config. Walk upward so both layouts resolve the
+    # nearest eval_metadata.json.
+    metadata_path = find_nearest_file(run_dir, root, "eval_metadata.json")
+    if metadata_path:
+        try:
+            metadata = json.loads(metadata_path.read_text())
+            prompt = metadata.get("prompt", "")
+            eval_id = metadata.get("eval_id")
+        except (json.JSONDecodeError, OSError):
+            pass
 
     # Fall back to transcript.md
     if not prompt:

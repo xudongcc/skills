@@ -64,6 +64,24 @@ def calculate_stats(values: list[float]) -> dict:
     }
 
 
+def load_run_status(run_dir: Path) -> str:
+    """Load deterministic execution status, defaulting legacy runs to complete."""
+    for status_file in [
+        run_dir / "outputs" / "metrics.json",
+        run_dir / "timing.json",
+    ]:
+        if not status_file.exists():
+            continue
+        try:
+            with open(status_file) as sf:
+                status = json.load(sf).get("run_status")
+        except (json.JSONDecodeError, OSError) as error:
+            raise ValueError(f"Invalid execution metadata in {status_file}: {error}") from error
+        if status:
+            return status
+    return "completed"
+
+
 def load_run_results(benchmark_dir: Path) -> dict:
     """
     Load all run results from a benchmark directory.
@@ -111,10 +129,18 @@ def load_run_results(benchmark_dir: Path) -> dict:
             for run_dir in sorted(config_dir.glob("run-*")):
                 run_number = int(run_dir.name.split("-")[1])
                 grading_file = run_dir / "grading.json"
+                run_status = load_run_status(run_dir)
+
+                if run_status != "completed":
+                    raise RuntimeError(
+                        f"Cannot aggregate {run_dir}: execution status is "
+                        f"{run_status}"
+                    )
 
                 if not grading_file.exists():
-                    print(f"Warning: grading.json not found in {run_dir}")
-                    continue
+                    raise RuntimeError(
+                        f"Cannot aggregate {run_dir}: grading.json not found"
+                    )
 
                 try:
                     with open(grading_file) as f:
@@ -133,11 +159,13 @@ def load_run_results(benchmark_dir: Path) -> dict:
                     "total": grading.get("summary", {}).get("total", 0),
                 }
 
-                # Extract timing — check grading.json first, then sibling timing.json
+                # Extract timing — support legacy grading.json, then prefer the
+                # deterministic sibling timing.json written by the executor.
                 timing = grading.get("timing", {})
+                timing_data = {}
                 result["time_seconds"] = timing.get("total_duration_seconds", 0.0)
                 timing_file = run_dir / "timing.json"
-                if result["time_seconds"] == 0.0 and timing_file.exists():
+                if timing_file.exists():
                     try:
                         with open(timing_file) as tf:
                             timing_data = json.load(tf)
@@ -146,12 +174,32 @@ def load_run_results(benchmark_dir: Path) -> dict:
                     except json.JSONDecodeError:
                         pass
 
-                # Extract metrics if available
+                # Extract metrics — support legacy grading.json, then prefer
+                # outputs/metrics.json so rubric grading never rewrites
+                # deterministic execution data.
                 metrics = grading.get("execution_metrics", {})
+                metrics_file = run_dir / "outputs" / "metrics.json"
+                if metrics_file.exists():
+                    try:
+                        with open(metrics_file) as mf:
+                            metrics = json.load(mf)
+                    except json.JSONDecodeError:
+                        pass
                 result["tool_calls"] = metrics.get("total_tool_calls", 0)
-                if not result.get("tokens"):
-                    result["tokens"] = metrics.get("output_chars", 0)
+                result.setdefault("tokens", 0)
                 result["errors"] = metrics.get("errors_encountered", 0)
+                result["status"] = metrics.get(
+                    "run_status",
+                    timing_data.get(
+                        "run_status",
+                        timing.get("run_status", "completed"),
+                    ),
+                )
+                if result["status"] != "completed":
+                    raise RuntimeError(
+                        f"Cannot aggregate {run_dir}: execution status is "
+                        f"{result['status']}"
+                    )
 
                 # Extract expectations — viewer requires fields: text, passed, evidence
                 raw_expectations = grading.get("expectations", [])
@@ -260,6 +308,25 @@ def generate_benchmark(benchmark_dir: Path, skill_name: str = "", skill_path: st
         for r in config
     ))
 
+    run_counts_by_configuration: dict[str, dict[str, int]] = {}
+    observed_run_counts: list[int] = []
+    for config, config_results in results.items():
+        counts_by_eval: dict[str, int] = {}
+        for result in config_results:
+            eval_key = str(result["eval_id"])
+            counts_by_eval[eval_key] = counts_by_eval.get(eval_key, 0) + 1
+        run_counts_by_configuration[config] = counts_by_eval
+        observed_run_counts.extend(counts_by_eval.values())
+
+    if not observed_run_counts:
+        runs_per_configuration: int | str = 0
+    elif len(set(observed_run_counts)) == 1:
+        runs_per_configuration = observed_run_counts[0]
+    else:
+        runs_per_configuration = (
+            f"varies ({min(observed_run_counts)}-{max(observed_run_counts)})"
+        )
+
     benchmark = {
         "metadata": {
             "skill_name": skill_name or "<skill-name>",
@@ -268,7 +335,8 @@ def generate_benchmark(benchmark_dir: Path, skill_name: str = "", skill_path: st
             "analyzer_model": "<model-name>",
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "evals_run": eval_ids,
-            "runs_per_configuration": 3
+            "runs_per_configuration": runs_per_configuration,
+            "run_counts_by_configuration": run_counts_by_configuration,
         },
         "runs": runs,
         "run_summary": run_summary,
@@ -367,7 +435,15 @@ def main():
         sys.exit(1)
 
     # Generate benchmark
-    benchmark = generate_benchmark(args.benchmark_dir, args.skill_name, args.skill_path)
+    try:
+        benchmark = generate_benchmark(
+            args.benchmark_dir,
+            args.skill_name,
+            args.skill_path,
+        )
+    except (RuntimeError, ValueError) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        sys.exit(1)
 
     # Determine output paths
     output_json = args.output or (args.benchmark_dir / "benchmark.json")
