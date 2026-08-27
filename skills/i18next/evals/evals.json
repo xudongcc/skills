@@ -1,0 +1,275 @@
+{
+  "skill_name": "i18next",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "This Vite React app has hardcoded English strings and no translation resources yet. Set up i18next-cli so English and German files live in the repository, preview the source instrumentation, apply only safe transformations, extract keys, and verify the result.",
+      "expected_output": "A local i18next-cli workflow that inspects the existing runtime, initializes a local config, previews instrumentation, reviews generated source and initialization changes, extracts resources, and verifies status, types, tests, and diffs.",
+      "files": [],
+      "expectations": [
+        "The workflow keeps translation resources in the repository and uses the local-files initializer path or an equivalent explicit config.",
+        "Instrumentation is previewed with --dry-run before any write and the source diff is reviewed.",
+        "The answer distinguishes CLI resource maintenance from runtime i18next dependencies and initialization.",
+        "Verification includes translation status plus relevant typecheck, tests, or build checks."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Our CI says generated i18next locale files and TypeScript definitions may be stale. Diagnose the mismatch in my working tree without modifying any files, then tell me the exact commands CI should run.",
+      "expected_output": "A check-only diagnosis using status, extract dry-run plus CI semantics, and types --ci, with a warning that extract --ci alone may write resources.",
+      "files": [],
+      "expectations": [
+        "The response uses extract --dry-run or extract --dry-run --ci for non-mutating extraction checks.",
+        "The response does not claim that extract --ci alone is read-only.",
+        "The response uses types --ci for a check-only type-definition verification.",
+        "The response inspects config paths and uses --config when monorepo ambiguity requires it."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Rename the i18next key common:checkout.pay to common:checkout.submit everywhere in source and local resource files, without losing any existing translations.",
+      "expected_output": "A guarded rename-key workflow that previews the atomic source/resource refactor, applies it, inspects diffs, and verifies resource completeness without unnecessary synchronization.",
+      "files": [],
+      "expectations": [
+        "The workflow runs rename-key with --dry-run before applying the rename.",
+        "The old and new names retain their namespace prefix.",
+        "The workflow inspects source and resource diffs and verifies status afterward.",
+        "The workflow avoids broad sync operations that could disturb unrelated translated values."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Our German locale is incomplete. In common.json, welcome is 'Welcome back, {{name}}!', cart.items_one is '{{count}} item', cart.items_other is '{{count}} items', and docsLink is 'Read <1>the documentation</1>'. Fill only the missing German translations. Keep all existing non-empty German values unchanged and verify the result locally.",
+      "expected_output": "The agent inventories missing German values, uses source and neighboring translations for context, writes natural German translations, preserves interpolation and rich-text tokens exactly, leaves existing translations untouched, and verifies the completed locale.",
+      "files": [],
+      "expectations": [
+        "The agent performs the missing translations instead of only reporting status or asking the user to translate them.",
+        "The translated values preserve {{name}}, {{count}}, and the balanced <1>...</1> rich-text placeholder exactly.",
+        "The workflow treats plural variants as complete target-language phrases and checks their target-locale semantics.",
+        "Existing non-empty German translations and unrelated locale files are preserved.",
+        "Verification includes status de --hide-translated, locale diff inspection, and relevant lint, type, test, or build checks."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "This React app already has complete English and German local JSON resources. Add French as a third language, generate its complete resource structure, fill the French translations, and wire it into the runtime language selector without changing any existing English or German translation values.",
+      "expected_output": "A guarded incremental-language workflow that establishes a clean baseline, updates CLI and runtime locale configuration, creates a French skeleton, translates it locally with i18next-safe tokens and plural forms, preserves existing locales, and verifies status and runtime loading.",
+      "files": [],
+      "expectations": [
+        "The workflow establishes clean extraction and type baselines before adding French.",
+        "French is added to both i18next-cli configuration and the application's runtime language loading or selector configuration.",
+        "The workflow generates the French key structure locally and then fills the missing French translations rather than leaving placeholders as the final result.",
+        "Existing English and German non-empty values are checked and preserved.",
+        "The workflow verifies French status, placeholder and plural integrity, generated types when configured, tests or build, and runtime language switching."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Add a destructive account-deletion confirmation to the Settings screen. It should open from a Delete account button, explain that deletion cannot be undone, ask the user to type their email, expose Cancel and Delete account actions, and show a deleting state while the request is pending. Follow the repository's existing patterns and verify the change.",
+      "expected_output": "A working Settings feature that automatically follows the repository's existing i18next conventions despite the prompt not mentioning localization, adds complete English and German copy for only the new feature, preserves existing translations and runtime configuration, and passes project checks.",
+      "files": [
+        "evals/fixtures/react-local-app/.gitignore",
+        "evals/fixtures/react-local-app/package.json",
+        "evals/fixtures/react-local-app/i18next.config.ts",
+        "evals/fixtures/react-local-app/src/i18n.ts",
+        "evals/fixtures/react-local-app/src/LanguageSelector.tsx",
+        "evals/fixtures/react-local-app/src/Settings.tsx",
+        "evals/fixtures/react-local-app/src/ProfileForm.tsx",
+        "evals/fixtures/react-local-app/src/preferenceCache.mjs",
+        "evals/fixtures/react-local-app/locales/en/settings.json",
+        "evals/fixtures/react-local-app/locales/de/settings.json",
+        "evals/fixtures/react-local-app/scripts/check-i18n.mjs",
+        "evals/fixtures/react-local-app/tests/preferenceCache.test.mjs"
+      ],
+      "expectations": [
+        "The implementation recognizes the existing i18next setup without being prompted and introduces no new hardcoded user-visible copy.",
+        "The account-deletion flow follows the existing settings namespace and runtime binding rather than creating a second i18n pattern.",
+        "Every key introduced for the feature has a complete natural English and German value, with any interpolation or rich-text tokens preserved.",
+        "Existing English and German values plus unrelated runtime and locale configuration remain unchanged.",
+        "The implementation runs the repository's i18n integrity check and relevant tests or equivalent finite verification."
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "The settings preference cache leaks across organizations. Update the cache key so it includes organizationId as well as userId, add regression coverage, and verify the fix. Keep the public API unchanged.",
+      "expected_output": "A focused cache-key fix and regression test with no translation, locale, generated i18n type, or runtime configuration changes because the task has no user-visible language impact.",
+      "files": [
+        "evals/fixtures/react-local-app/.gitignore",
+        "evals/fixtures/react-local-app/package.json",
+        "evals/fixtures/react-local-app/i18next.config.ts",
+        "evals/fixtures/react-local-app/src/i18n.ts",
+        "evals/fixtures/react-local-app/src/LanguageSelector.tsx",
+        "evals/fixtures/react-local-app/src/Settings.tsx",
+        "evals/fixtures/react-local-app/src/ProfileForm.tsx",
+        "evals/fixtures/react-local-app/src/preferenceCache.mjs",
+        "evals/fixtures/react-local-app/locales/en/settings.json",
+        "evals/fixtures/react-local-app/locales/de/settings.json",
+        "evals/fixtures/react-local-app/scripts/check-i18n.mjs",
+        "evals/fixtures/react-local-app/tests/preferenceCache.test.mjs"
+      ],
+      "expectations": [
+        "The cache key distinguishes the same userId in different organizations while preserving the public API.",
+        "Regression coverage demonstrates isolation by organization as well as the existing user isolation behavior.",
+        "Locale resources, i18next configuration, runtime initialization, and translation call sites are byte-for-byte unchanged.",
+        "The workflow does not run or propose broad resource-writing commands for a task with no i18n impact.",
+        "The focused cache tests pass."
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "Remove the legacy email-notifications section from Settings. Delete its UI and any code or resources made obsolete by this section while preserving all other settings and error handling. Verify the change.",
+      "expected_output": "A scoped feature removal that deletes only the notification UI and translation keys proven obsolete, preserves shared and dynamically referenced translations in both locales, and verifies source, locale, and test integrity.",
+      "files": [
+        "evals/fixtures/react-local-app/.gitignore",
+        "evals/fixtures/react-local-app/package.json",
+        "evals/fixtures/react-local-app/i18next.config.ts",
+        "evals/fixtures/react-local-app/src/i18n.ts",
+        "evals/fixtures/react-local-app/src/LanguageSelector.tsx",
+        "evals/fixtures/react-local-app/src/Settings.tsx",
+        "evals/fixtures/react-local-app/src/ProfileForm.tsx",
+        "evals/fixtures/react-local-app/src/preferenceCache.mjs",
+        "evals/fixtures/react-local-app/locales/en/settings.json",
+        "evals/fixtures/react-local-app/locales/de/settings.json",
+        "evals/fixtures/react-local-app/scripts/check-i18n.mjs",
+        "evals/fixtures/react-local-app/tests/preferenceCache.test.mjs"
+      ],
+      "expectations": [
+        "The legacy notification section and its now-unreferenced notification keys are removed from source, English, and German resources.",
+        "Shared action keys used by ProfileForm remain intact in both locales.",
+        "Dynamically referenced errors.network and errors.forbidden keys remain intact because static unused-key analysis cannot prove them dead.",
+        "All unrelated source behavior and existing locale values remain unchanged.",
+        "Verification covers unused-key review, i18n integrity, and relevant tests without a broad destructive sync."
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "Change only the email-notifications submit button so its idle label says 'Enable email alerts' and its pending label says 'Enabling…'. The Profile form must continue to say 'Save changes'. Follow the repository's existing patterns and verify the change.",
+      "expected_output": "A semantic split of the formerly shared action copy: notification-specific source calls and complete English/German translations are introduced while the Profile form and its shared save translation remain unchanged.",
+      "files": [
+        "evals/fixtures/react-local-app/.gitignore",
+        "evals/fixtures/react-local-app/package.json",
+        "evals/fixtures/react-local-app/i18next.config.ts",
+        "evals/fixtures/react-local-app/src/i18n.ts",
+        "evals/fixtures/react-local-app/src/LanguageSelector.tsx",
+        "evals/fixtures/react-local-app/src/Settings.tsx",
+        "evals/fixtures/react-local-app/src/ProfileForm.tsx",
+        "evals/fixtures/react-local-app/src/preferenceCache.mjs",
+        "evals/fixtures/react-local-app/locales/en/settings.json",
+        "evals/fixtures/react-local-app/locales/de/settings.json",
+        "evals/fixtures/react-local-app/scripts/check-i18n.mjs",
+        "evals/fixtures/react-local-app/tests/preferenceCache.test.mjs"
+      ],
+      "expectations": [
+        "The notification button stops reusing actions.save for its idle state and uses notification-specific semantic keys for both idle and pending copy.",
+        "The new idle and pending values are complete natural English and German translations with the requested meanings.",
+        "ProfileForm still references actions.save, whose existing English and German values remain byte-for-byte unchanged.",
+        "No unrelated source, runtime configuration, selector, or locale values change.",
+        "The repository i18n integrity check and relevant tests pass."
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "Add a storage-usage summary to Settings. It receives a usedGigabytes number, renders '1 GB used' for one and '{{count}} GB used' otherwise, and includes the sentence 'Read the storage policy' with 'storage policy' rendered as a link. Follow the repository's existing patterns and verify the change.",
+      "expected_output": "A localized React implementation using i18next count-based plurals and a Trans-style rich-text sentence, with complete English/German resources, preserved tokens and existing values, and finite project verification.",
+      "files": [
+        "evals/fixtures/react-local-app/.gitignore",
+        "evals/fixtures/react-local-app/package.json",
+        "evals/fixtures/react-local-app/i18next.config.ts",
+        "evals/fixtures/react-local-app/src/i18n.ts",
+        "evals/fixtures/react-local-app/src/LanguageSelector.tsx",
+        "evals/fixtures/react-local-app/src/Settings.tsx",
+        "evals/fixtures/react-local-app/src/ProfileForm.tsx",
+        "evals/fixtures/react-local-app/src/preferenceCache.mjs",
+        "evals/fixtures/react-local-app/locales/en/settings.json",
+        "evals/fixtures/react-local-app/locales/de/settings.json",
+        "evals/fixtures/react-local-app/scripts/check-i18n.mjs",
+        "evals/fixtures/react-local-app/tests/preferenceCache.test.mjs"
+      ],
+      "expectations": [
+        "The implementation passes usedGigabytes as i18next's count option instead of concatenating translated fragments.",
+        "English and German resources contain complete one and other plural variants that preserve {{count}} exactly.",
+        "The linked sentence uses Trans or the repository's equivalent rich-text binding, and both locales preserve balanced component placeholder tags.",
+        "No new user-visible copy is hardcoded and all pre-existing locale values remain unchanged.",
+        "Verification covers resource parsing, placeholder integrity, i18n integrity, and relevant tests."
+      ]
+    },
+    {
+      "id": 11,
+      "prompt": "Add French as a fully supported language in this app. Add complete French settings resources and wire fr through i18next-cli configuration, bundled runtime resources, supported languages, and the existing language selector. Preserve every existing English and German translation value. Do not install dependencies; use the repository-provided checks and verify the change.",
+      "expected_output": "A complete local French onboarding implemented in the fixture: CLI and runtime language sets, resource registration, selector endonym, and a fully translated French catalog all agree while English and German files remain byte-identical.",
+      "files": [
+        "evals/fixtures/react-local-app/.gitignore",
+        "evals/fixtures/react-local-app/package.json",
+        "evals/fixtures/react-local-app/i18next.config.ts",
+        "evals/fixtures/react-local-app/src/i18n.ts",
+        "evals/fixtures/react-local-app/src/LanguageSelector.tsx",
+        "evals/fixtures/react-local-app/src/Settings.tsx",
+        "evals/fixtures/react-local-app/src/ProfileForm.tsx",
+        "evals/fixtures/react-local-app/src/preferenceCache.mjs",
+        "evals/fixtures/react-local-app/locales/en/settings.json",
+        "evals/fixtures/react-local-app/locales/de/settings.json",
+        "evals/fixtures/react-local-app/scripts/check-i18n.mjs",
+        "evals/fixtures/react-local-app/tests/preferenceCache.test.mjs"
+      ],
+      "expectations": [
+        "fr is added consistently to CLI locales and secondary languages, runtime imports and resources, supportedLanguages, and the selector with the endonym Français.",
+        "The French settings catalog has exactly the same key structure as English and contains complete natural French values.",
+        "Any interpolation, plural, nesting, or rich-text tokens in the French catalog match the English source tokens.",
+        "Existing English and German resource files remain byte-for-byte unchanged.",
+        "The repository i18n integrity check and tests pass with all three language surfaces aligned."
+      ]
+    },
+    {
+      "id": 12,
+      "prompt": "There is an unrelated uncommitted German copy edit already in the working tree. Add a Support panel to Settings with the heading 'Need help?', the description 'Contact our support team.', and a 'Contact support' mailto link. Follow existing patterns, preserve all existing work, and verify the change.",
+      "expected_output": "A narrowly localized English/German Support panel added around a dirty worktree without overwriting, reverting, or absorbing the pre-existing German copy edit, followed by scoped diff and project verification.",
+      "files": [
+        "evals/fixtures/react-local-app/.gitignore",
+        "evals/fixtures/react-local-app/package.json",
+        "evals/fixtures/react-local-app/i18next.config.ts",
+        "evals/fixtures/react-local-app/src/i18n.ts",
+        "evals/fixtures/react-local-app/src/LanguageSelector.tsx",
+        "evals/fixtures/react-local-app/src/Settings.tsx",
+        "evals/fixtures/react-local-app/src/ProfileForm.tsx",
+        "evals/fixtures/react-local-app/src/preferenceCache.mjs",
+        "evals/fixtures/react-local-app/locales/en/settings.json",
+        "evals/fixtures/react-local-app/locales/de/settings.json",
+        "evals/fixtures/react-local-app/scripts/check-i18n.mjs",
+        "evals/fixtures/react-local-app/tests/preferenceCache.test.mjs"
+      ],
+      "expectations": [
+        "The pre-existing uncommitted German notifications.description value remains exactly unchanged in the final working tree.",
+        "The Support panel follows the existing settings namespace and introduces no hardcoded heading, description, link label, or accessibility copy.",
+        "Complete natural English and German values are added only for the Support panel.",
+        "No unrelated existing locale values, runtime configuration, selector, or tests are modified.",
+        "The agent distinguishes the pre-existing diff from its own changes and the repository checks pass."
+      ]
+    },
+    {
+      "id": 13,
+      "prompt": "Add a session-timeout warning to Settings with the heading 'Session timeout', the description 'Sign in again to continue.', and a 'Sign in again' action. The repository already has an unrelated incomplete German legacy translation; do not expand this feature task into backlog cleanup. Follow existing patterns and verify as far as the repository allows.",
+      "expected_output": "A scoped localized feature with complete new English/German values that deliberately leaves the unrelated empty legacy translation untouched, identifies it as a pre-existing verification failure, and still runs focused tests and diff checks without claiming a clean global i18n result.",
+      "files": [
+        "evals/fixtures/react-local-app-backlog/.gitignore",
+        "evals/fixtures/react-local-app-backlog/package.json",
+        "evals/fixtures/react-local-app-backlog/i18next.config.ts",
+        "evals/fixtures/react-local-app-backlog/src/i18n.ts",
+        "evals/fixtures/react-local-app-backlog/src/LanguageSelector.tsx",
+        "evals/fixtures/react-local-app-backlog/src/Settings.tsx",
+        "evals/fixtures/react-local-app-backlog/src/ProfileForm.tsx",
+        "evals/fixtures/react-local-app-backlog/src/preferenceCache.mjs",
+        "evals/fixtures/react-local-app-backlog/locales/en/settings.json",
+        "evals/fixtures/react-local-app-backlog/locales/de/settings.json",
+        "evals/fixtures/react-local-app-backlog/scripts/check-i18n.mjs",
+        "evals/fixtures/react-local-app-backlog/tests/preferenceCache.test.mjs"
+      ],
+      "expectations": [
+        "The session-timeout feature follows the existing settings namespace and has complete natural English and German heading, description, and action values.",
+        "The unrelated de:legacy.subtitle value remains empty and no other backlog translation is edited.",
+        "The agent establishes or identifies the pre-existing i18n failure and does not misattribute it to the new feature.",
+        "The agent runs focused tests and diff checks separately and does not falsely claim that the global i18n verification passed.",
+        "All unrelated existing source behavior, runtime configuration, selector, and non-backlog locale values remain unchanged."
+      ]
+    }
+  ]
+}

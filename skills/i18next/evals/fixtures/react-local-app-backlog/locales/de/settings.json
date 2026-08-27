@@ -1,0 +1,29 @@
+{
+  "settings": {
+    "title": "Einstellungen"
+  },
+  "languageSelector": {
+    "label": "Sprache"
+  },
+  "legacy": {
+    "subtitle": ""
+  },
+  "profile": {
+    "title": "Profil",
+    "emailLabel": "E-Mail-Adresse"
+  },
+  "notifications": {
+    "title": "E-Mail-Benachrichtigungen",
+    "description": "Lege fest, ob Kontoaktualisierungen per E-Mail gesendet werden.",
+    "enabled": "E-Mail-Benachrichtigungen erhalten"
+  },
+  "actions": {
+    "save": "Änderungen speichern",
+    "saving": "Wird gespeichert…",
+    "cancel": "Abbrechen"
+  },
+  "errors": {
+    "network": "Die Einstellungen konnten nicht gespeichert werden. Versuche es erneut.",
+    "forbidden": "Du bist nicht berechtigt, diese Einstellungen zu ändern."
+  }
+}

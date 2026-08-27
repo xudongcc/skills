@@ -1,0 +1,18 @@
+{
+  "name": "i18next-react-local-eval-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "verify": "npm run check:i18n && npm test"
+  },
+  "dependencies": {
+    "i18next": "^25.5.2",
+    "react": "^19.1.1",
+    "react-i18next": "^15.7.3"
+  },
+  "devDependencies": {
+    "i18next-cli": "1.71.3"
+  }
+}

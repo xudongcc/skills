@@ -1,0 +1,29 @@
+{
+  "settings": {
+    "title": "Settings"
+  },
+  "languageSelector": {
+    "label": "Language"
+  },
+  "legacy": {
+    "subtitle": "Legacy account preferences"
+  },
+  "profile": {
+    "title": "Profile",
+    "emailLabel": "Email address"
+  },
+  "notifications": {
+    "title": "Email notifications",
+    "description": "Choose whether account updates are sent by email.",
+    "enabled": "Send me email notifications"
+  },
+  "actions": {
+    "save": "Save changes",
+    "saving": "Saving…",
+    "cancel": "Cancel"
+  },
+  "errors": {
+    "network": "Could not save settings. Try again.",
+    "forbidden": "You do not have permission to change these settings."
+  }
+}

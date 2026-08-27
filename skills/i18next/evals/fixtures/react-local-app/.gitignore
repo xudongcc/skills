@@ -1,0 +1,4 @@
+.agents/
+outputs/
+trace.jsonl
+timing.json
