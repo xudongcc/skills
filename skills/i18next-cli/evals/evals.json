@@ -1,0 +1,41 @@
+{
+  "skill_name": "i18next-cli",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "This Vite React app has hardcoded English strings and no translation resources yet. Set up i18next-cli so English and German files live in the repository, preview the source instrumentation, apply only safe transformations, extract keys, and verify the result.",
+      "expected_output": "A local i18next-cli workflow that inspects the existing runtime, initializes a local config, previews instrumentation, reviews generated source and initialization changes, extracts resources, and verifies status, types, tests, and diffs.",
+      "files": [],
+      "expectations": [
+        "The workflow keeps translation resources in the repository and uses the local-files initializer path or an equivalent explicit config.",
+        "Instrumentation is previewed with --dry-run before any write and the source diff is reviewed.",
+        "The answer distinguishes CLI resource maintenance from runtime i18next dependencies and initialization.",
+        "Verification includes translation status plus relevant typecheck, tests, or build checks."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Our CI says generated i18next locale files and TypeScript definitions may be stale. Diagnose the mismatch in my working tree without modifying any files, then tell me the exact commands CI should run.",
+      "expected_output": "A check-only diagnosis using status, extract dry-run plus CI semantics, and types --ci, with a warning that extract --ci alone may write resources.",
+      "files": [],
+      "expectations": [
+        "The response uses extract --dry-run or extract --dry-run --ci for non-mutating extraction checks.",
+        "The response does not claim that extract --ci alone is read-only.",
+        "The response uses types --ci for a check-only type-definition verification.",
+        "The response inspects config paths and uses --config when monorepo ambiguity requires it."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Rename the i18next key common:checkout.pay to common:checkout.submit everywhere in source and local resource files, without losing any existing translations.",
+      "expected_output": "A guarded rename-key workflow that previews the atomic source/resource refactor, applies it, inspects diffs, and verifies resource completeness without unnecessary synchronization.",
+      "files": [],
+      "expectations": [
+        "The workflow runs rename-key with --dry-run before applying the rename.",
+        "The old and new names retain their namespace prefix.",
+        "The workflow inspects source and resource diffs and verifies status afterward.",
+        "The workflow avoids broad sync operations that could disturb unrelated translated values."
+      ]
+    }
+  ]
+}

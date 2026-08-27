@@ -26,10 +26,13 @@ npx skills add https://github.com/xudongcc/skills \
 ## Skills 列表
 
 <!-- BEGIN GENERATED SKILLS -->
-| Skill | 描述 |
-| --- | --- |
-| [openclaw-lark-send-message](skills/openclaw-lark-send-message/) | Send Feishu/Lark messages, create native user or bot mentions, resolve recipient IDs, test bot reachability, and troubleshoot mentions rendered as plain text. |
-| [skill-creator](skills/skill-creator/) | Create new skills, modify and improve existing skills, and measure skill performance. Use for skill creation, editing, evals, benchmarking with variance analysis, and trigger-description optimization. |
+
+| Skill                                                            | 描述                                                                                                                                                                                                     |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [i18next-cli](skills/i18next-cli/)                               | Initialize and maintain local i18next resources with i18next-cli, including extraction, synchronization, status checks, type generation, migration, key renaming, linting, and instrumentation.          |
+| [openclaw-lark-send-message](skills/openclaw-lark-send-message/) | Send Feishu/Lark messages, create native user or bot mentions, resolve recipient IDs, test bot reachability, and troubleshoot mentions rendered as plain text.                                           |
+| [skill-creator](skills/skill-creator/)                           | Create new skills, modify and improve existing skills, and measure skill performance. Use for skill creation, editing, evals, benchmarking with variance analysis, and trigger-description optimization. |
+
 <!-- END GENERATED SKILLS -->
 
 ## 维护
