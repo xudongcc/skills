@@ -29,6 +29,7 @@ npx skills add https://github.com/xudongcc/skills \
 
 | Skill                                                            | 描述                                                                                                                                                                                                                      |
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [autoreview](skills/autoreview/)                                 | Structured Codex, Claude, Amp, Pi, or Kimi code review when explicitly requested.                                                                                                                                         |
 | [i18next](skills/i18next/)                                       | Automatically maintain i18next during normal development, including runtime usage, keys and namespaces, local resources and translations, language loading, generated types, and i18next-cli extraction and verification. |
 | [openclaw-lark-send-message](skills/openclaw-lark-send-message/) | Send Feishu/Lark messages, create native user or bot mentions, resolve recipient IDs, test bot reachability, and troubleshoot mentions rendered as plain text.                                                            |
 | [skill-creator](skills/skill-creator/)                           | Create new skills, modify and improve existing skills, and measure skill performance. Use for skill creation, editing, evals, benchmarking with variance analysis, and trigger-description optimization.                  |
@@ -37,7 +38,7 @@ npx skills add https://github.com/xudongcc/skills \
 
 ## 维护
 
-`skills/` 是所有 skill 的源码目录。当前仓库通过相对软链接让 `.agents/skills/skill-creator` 指向 `skills/skill-creator`，因此可以直接使用同一份源码创建、评估和改进其他 skills。
+`skills/` 是所有 skill 的源码目录。需要在本仓库中直接使用的 skill 通过 `.agents/skills/` 下的相对软链接指向同一份源码。
 
 修改 skill 后运行快速校验：
 
