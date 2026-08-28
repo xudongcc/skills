@@ -164,50 +164,61 @@ See `references/schemas.md` for the full schema (including the `expectations` fi
 
 Treat this section as one continuous sequence and do not stop after launching runs; carry the workflow through grading and human review.
 
-Create the evaluation workspace with `python <skill-creator-path>/scripts/create_eval_workspace.py --skill-path <path-to-skill>` and use the absolute temporary path it prints for the full evaluation and review loop. Preserve required artifacts before removing it. Within the workspace, organize results by iteration (`iteration-1/`, `iteration-2/`, etc.) and within that, each test case gets a directory (`eval-0/`, `eval-1/`, etc.). Don't create all of this upfront — just create directories as you go.
+Create the evaluation workspace once:
+
+```bash
+python <skill-creator-path>/scripts/create_eval_workspace.py \
+  --skill-path <path-to-skill>
+```
+
+The printed temporary path contains an immutable `.skill-creator-workspace.json` with the workspace identity and original skill location. Preserve required artifacts before removing the workspace.
+
+Prepare each comparison as a separate iteration:
+
+```bash
+python <skill-creator-path>/scripts/create_iteration.py <workspace> \
+  --baseline <none|previous|path-to-skill> \
+  --runs 3 \
+  --model <model-id>
+```
+
+`create_iteration.py` only snapshots versions and prepares manifests, input copies, and run directories. It does not execute, grade, aggregate, or review anything. Use `none` when creating a new skill, `previous` to compare with the preceding candidate snapshot, or a skill path for an explicit old version.
+
+The workspace marker stays fixed. Each `iteration-N/iteration.json` records that round's candidate snapshot, optional baseline snapshot, model, run count, configurations, and eval directories. Each eval directory contains one `eval_metadata.json` with its prompt and expectations. Runtime scripts resolve all inputs from these manifests instead of accepting duplicate configuration flags.
+
+```text
+iteration-N/
+├── iteration.json
+├── snapshots/
+│   ├── new_skill/<skill-name>/
+│   └── old_skill/<skill-name>/      # omitted for a no-skill baseline
+└── eval-<id>-<name>/
+    ├── eval_metadata.json
+    ├── new_skill/run-1/
+    └── old_skill/run-1/             # or without_skill/run-1/
+```
 
 ### Step 1: Start all runs (with-skill AND baseline) together
 
-For each test case, start two isolated Codex CLI runs together — one with the skill and one baseline. Subagents may orchestrate these commands in parallel when the host permits, but `codex exec --json` is the executor so every run produces the same trace format. If parallel execution is unavailable, interleave the pairs; do not finish every with-skill run before starting baselines because time-based changes can bias the comparison.
-
-Each configuration contains `run-<R>/`, even when there is only one run. Use a fresh absolute run directory below the generated workspace as the Codex working root and place input files there before launching the run. Use absolute paths in CLI arguments so `-C` cannot change where artifacts land.
-
-**With-skill run:**
+For every eval and run number, start the candidate and baseline together:
 
 ```bash
-python <skill-creator-path>/scripts/run_test_case.py \
-  --run-dir <absolute-run-directory> \
-  --skill-path <path-to-skill> \
-  --model <model-id> \
-  --prompt "<eval prompt>"
+python <skill-creator-path>/scripts/run_test_case.py <run-dir>
 ```
 
-**Baseline run** (same prompt, but the baseline depends on context):
-- **Creating a new skill**: run the same wrapper in `without_skill/run-<R>/` but omit `--skill-path`.
-- **Improving an existing skill**: snapshot the old version before editing, run the same wrapper in `old_skill/run-<R>/`, and pass the snapshot to `--skill-path`.
+The run directory is the only argument. The wrapper validates the enclosing manifests, reads the prompt, model, installed snapshot, and protected comparison sources from them, and writes `trace.jsonl`, `outputs/final.md`, `outputs/metrics.json`, and `timing.json`. It installs a physical skill copy under the run-local `.agents/skills/` when that configuration has a skill.
 
-Launch the paired wrapper calls together. `run_test_case.py` verifies the generated workspace, uses an ephemeral workspace-write Codex process, installs the requested skill fixture, appends the `outputs/` delivery instruction, and writes `trace.jsonl`, `outputs/final.md`, `outputs/metrics.json`, and `timing.json`. Use `--prompt-file` instead of `--prompt` for long or multiline prompts.
+The wrapper gives both sides the same isolation and output-location instructions, protects all external source and snapshot copies, discovers global copies by frontmatter skill name, and audits the trace for disclosure or use. Treat `run_status: "contaminated"` as invalid evidence; do not grade, aggregate, or compare that run.
 
-Keep the model, prompt, input files, sandbox, and run count identical between the paired configurations. The only intended difference is the skill version passed through `--skill-path`.
-
-Write an `eval_metadata.json` for each test case (expectations can be empty for now). Give each eval a descriptive name based on what it's testing — not just "eval-0". Use this name for the directory too. If this iteration uses new or modified eval prompts, create these files for each new eval directory — don't assume they carry over from previous iterations.
-
-```json
-{
-  "eval_id": 0,
-  "eval_name": "descriptive-name-here",
-  "prompt": "The user's task prompt",
-  "expectations": []
-}
-```
+Interleave matched pairs if parallel execution is unavailable. Do not finish every candidate run before starting baselines because time-based changes can bias the comparison.
 
 ### Step 2: While runs are in progress, draft expectations
 
-Don't just wait for the runs to finish — you can use this time productively. Draft quantitative expectations for each test case and explain them to the user. If expectations already exist in `evals/evals.json`, review them and explain what they check.
+Don't just wait for the runs to finish — use this time to review the quantitative expectations and explain them to the user. If an eval was prepared with an empty expectations list, complete that eval's `eval_metadata.json` before grading and apply the same list to every configuration in the eval.
 
 Good expectations are objectively verifiable and have descriptive names — they should read clearly in the benchmark viewer so someone glancing at the results immediately understands what each one checks. Subjective skills (writing style, design quality) are better evaluated qualitatively — don't force expectations onto things that need human judgment.
 
-Update the `eval_metadata.json` files and `evals/evals.json` with the expectations once drafted. Also explain to the user what they'll see in the viewer — both the qualitative outputs and the quantitative benchmark.
+Also update the source `evals/evals.json` so later iterations inherit the reviewed expectations. Explain what the user will see in the viewer: qualitative outputs and the quantitative benchmark.
 
 ### Step 3: As runs complete, inspect timing data
 
@@ -244,37 +255,30 @@ Once all runs are done:
 
 1. **Grade each run** — first use deterministic scripts for expectations that can be checked programmatically. For qualitative expectations, use the bundled grading wrapper, which applies `references/grading.schema.json`, validates the required run evidence, and writes `grading.json`:
    ```bash
-   python <skill-creator-path>/scripts/run_grader.py \
-     --run-dir <absolute-run-directory> \
-     --eval-metadata <absolute-eval-metadata-path>
+   python <skill-creator-path>/scripts/run_grader.py <run-dir>
    ```
    The `grading.json` expectations array must use `text`, `passed`, and `evidence`; the viewer depends on these exact fields. `--output-schema` makes the qualitative grader stable enough to aggregate across runs, while deterministic checks remain the source of truth for commands, files, and other directly observable behavior.
 
-2. **Aggregate into benchmark** — run the aggregation script from the skill-creator directory:
+2. **Aggregate into benchmark** — the aggregator requires every run declared in `iteration.json` to be completed and graded:
    ```bash
-   python -m scripts.aggregate_benchmark <workspace>/iteration-N --skill-name <name>
+   python <skill-creator-path>/scripts/aggregate_benchmark.py \
+     <workspace>/iteration-N
    ```
-   This produces `benchmark.json` and `benchmark.md` with pass_rate, time, and tokens for each configuration, with mean ± stddev and the delta. If generating benchmark.json manually, see `references/schemas.md` for the exact schema the viewer expects.
-Put each with_skill version before its baseline counterpart.
+   This produces `benchmark.json` and `benchmark.md` with pass rate, time, and tokens for each configuration, with mean ± standard deviation and the delta. If generating benchmark.json manually, see `references/schemas.md` for the exact schema the viewer expects.
+The manifest orders `new_skill` before its baseline so delta direction stays consistent.
 
 3. **Do an analyst pass** — read the benchmark data and surface patterns the aggregate stats might hide. See `agents/analyzer.md` (the "Analyzing Benchmark Results" section) for what to look for — things like expectations that always pass regardless of skill (non-discriminating), high-variance evals (possibly flaky), and time/token tradeoffs.
 
-4. **Launch the viewer** with both qualitative outputs and quantitative data:
+4. **Generate the viewer** with both qualitative outputs and quantitative data:
    ```bash
-   nohup python <skill-creator-path>/eval-viewer/generate_review.py \
-     <workspace>/iteration-N \
-     --skill-name "my-skill" \
-     --benchmark <workspace>/iteration-N/benchmark.json \
-     > /dev/null 2>&1 &
-   VIEWER_PID=$!
+   python <skill-creator-path>/eval-viewer/generate_review.py \
+     <workspace>/iteration-N
    ```
-   For iteration 2+, also pass `--previous-workspace <workspace>/iteration-<N-1>`.
-
-   **Headless or remote environments:** If `webbrowser.open()` is unavailable or the environment has no display, use `--static <output_path>` to write a standalone HTML file instead of starting a server. Open or present that artifact with the host's file-viewing capability. Feedback is downloaded as `feedback.json` when the user clicks "Submit All Reviews"; copy it into the workspace directory for the next iteration.
+   This writes `review.html` inside the iteration, loads `benchmark.json` when present, and includes the previous iteration recorded by the manifest. Open or present that artifact with the host's file-viewing capability. Feedback is downloaded as `feedback.json` when the user clicks "Submit All Reviews"; copy it into the iteration directory for the next round.
 
 Note: please use generate_review.py to create the viewer; there's no need to write custom HTML.
 
-5. **Tell the user** something like: "I've opened the results in your browser. There are two tabs — 'Outputs' lets you click through each test case and leave feedback, 'Benchmark' shows the quantitative comparison. When you're done, come back here and let me know."
+5. **Tell the user** something like: "I've opened the review page. There are two tabs — 'Outputs' lets you click through each test case and leave feedback, 'Benchmark' shows the quantitative comparison. When you're done, come back here and let me know."
 
 ### What the user sees in the viewer
 
@@ -297,21 +301,15 @@ When the user tells you they're done, read `feedback.json`:
 ```json
 {
   "reviews": [
-    {"run_id": "eval-0-with_skill", "feedback": "the chart is missing axis labels", "timestamp": "..."},
-    {"run_id": "eval-1-with_skill", "feedback": "", "timestamp": "..."},
-    {"run_id": "eval-2-with_skill", "feedback": "perfect, love this", "timestamp": "..."}
+    {"run_id": "eval-1-ocean-new_skill-run-1", "feedback": "the chart is missing axis labels", "timestamp": "..."},
+    {"run_id": "eval-2-river-new_skill-run-1", "feedback": "", "timestamp": "..."},
+    {"run_id": "eval-3-lake-new_skill-run-1", "feedback": "perfect, love this", "timestamp": "..."}
   ],
   "status": "complete"
 }
 ```
 
 Empty feedback means the user thought it was fine. Focus your improvements on the test cases where the user had specific complaints.
-
-Kill the viewer server when you're done with it:
-
-```bash
-kill $VIEWER_PID 2>/dev/null
-```
 
 ---
 
@@ -336,8 +334,8 @@ This task is pretty important (we are trying to create billions a year in econom
 After improving the skill:
 
 1. Apply your improvements to the skill
-2. Rerun all test cases into a new `iteration-<N+1>/` directory, including baseline runs. If you're creating a new skill, the baseline is always `without_skill` (no skill) — that stays the same across iterations. If you're improving an existing skill, use your judgment on what makes sense as the baseline: the original version the user came in with, or the previous iteration.
-3. Launch the reviewer with `--previous-workspace` pointing at the previous iteration
+2. Run `create_iteration.py` to prepare `iteration-<N+1>/`, using `none`, `previous`, or an explicit baseline path as appropriate, then execute and grade every declared run.
+3. Aggregate the new iteration and regenerate `review.html`; the manifest links the previous iteration automatically.
 4. Wait for the user to review and tell you they're done
 5. Read the new feedback, improve again, repeat
 
@@ -445,9 +443,9 @@ The core workflow is the same in Codex CLI, the IDE extension, and the desktop a
 
 **Skill location**: Repository skills belong under `.agents/skills/<skill-name>/`. Codex scans `.agents/skills` from the current working directory up to the repository root.
 
-**Running test cases**: Prefer isolated subagents when available and permitted. Otherwise use separate `codex exec` processes. If neither is possible, execute the prompts one at a time and disclose that the comparison is less independent.
+**Running test cases**: Use separate `run_test_case.py <run-dir>` processes for the prepared runs. Subagents may orchestrate those processes when available and permitted; otherwise interleave matched pairs.
 
-**Headless review**: Generate the viewer with `--static <output_path>`, then present or link the HTML artifact through the host. If even static HTML cannot be shown, present each prompt, output, and grade directly in the conversation and collect feedback inline.
+**Headless review**: `generate_review.py <iteration-dir>` always writes a static `review.html`; present or link that artifact through the host. If HTML cannot be shown, present each prompt, output, and grade directly in the conversation and collect feedback inline.
 
 **Description optimization**: `run_loop.py` and `run_eval.py` require the `codex` CLI. They create an isolated temporary `.agents/skills` fixture for each query and invoke `codex exec --ephemeral`. If `codex` is unavailable, skip automated trigger optimization and improve the description from the reviewed eval set manually.
 
@@ -475,8 +473,12 @@ The scripts/ directory also includes:
 - `scripts/codex_exec.py` — Shared Codex command and environment helpers used internally by workflow scripts
 - `scripts/collect_codex_metrics.py` — Convert `codex exec --json` traces into deterministic metrics and timing files
 - `scripts/create_eval_workspace.py` — Create and validate an isolated temporary evaluation workspace
+- `scripts/create_iteration.py` — Snapshot candidate and baseline versions and prepare the iteration manifest and run directories
+- `scripts/eval_manifest.py` — Shared internal manifest validation and run-context resolution
 - `scripts/run_test_case.py` — Run one full skill test case and capture all standard artifacts
 - `scripts/run_grader.py` — Grade one completed run with a schema-constrained Codex call
+- `scripts/aggregate_benchmark.py` — Aggregate every completed, graded run declared by one iteration
+- `eval-viewer/generate_review.py` — Generate one iteration's static review page
 
 ---
 

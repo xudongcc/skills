@@ -2,6 +2,7 @@
 """Run one full skill test case through an isolated medium-reasoning Codex."""
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -14,15 +15,23 @@ if str(SKILL_ROOT) not in sys.path:
 
 from scripts.codex_exec import (
     build_codex_exec_command,
+    discover_global_skill_files,
     reasoning_config,
     require_codex_cli,
 )
-from scripts.collect_codex_metrics import write_run_metrics
-from scripts.create_eval_workspace import validate_run_directory
+from scripts.collect_codex_metrics import load_jsonl, write_run_metrics
+from scripts.eval_manifest import load_run_context
 from scripts.utils import parse_skill_md, validate_skill_name
 
 
 TEST_REASONING_CONFIG = reasoning_config("medium")
+ISOLATION_VIOLATION_EXIT_CODE = 2
+EVALUATION_ISOLATION_INSTRUCTION = (
+    "Evaluation isolation: work only with files under the current run "
+    "directory. Do not inspect, search, or use skills or source checkouts "
+    "outside it, even if they are discoverable. If a skill is available for "
+    "this run, use only its copy under .agents/skills/."
+)
 DELIVERABLE_INSTRUCTION = "Save requested deliverables under outputs/."
 
 
@@ -51,11 +60,129 @@ def build_test_command(
 
 
 def build_test_prompt(prompt: str) -> str:
-    """Add the stable output-location instruction to a test prompt."""
+    """Add stable isolation and output-location instructions to a prompt."""
     prompt = prompt.strip()
     if not prompt:
         raise ValueError("Test prompt must not be empty")
-    return f"{prompt}\n\n{DELIVERABLE_INSTRUCTION}"
+    return (
+        f"{prompt}\n\n{EVALUATION_ISOLATION_INSTRUCTION}\n\n"
+        f"{DELIVERABLE_INSTRUCTION}"
+    )
+
+
+def collect_protected_skill_roots(
+    run_dir: Path,
+    skill_paths: list[Path],
+) -> list[Path]:
+    """Resolve source copies whose use would contaminate an eval run."""
+    run_dir = run_dir.resolve()
+    roots: dict[str, Path] = {}
+    skill_names = set()
+
+    for raw_path in skill_paths:
+        lexical_path = raw_path.expanduser().absolute()
+        resolved_path = lexical_path.resolve()
+        skill_file = resolved_path / "SKILL.md"
+        if not skill_file.is_file():
+            raise ValueError(f"No SKILL.md found at {raw_path}")
+        if (
+            resolved_path == run_dir
+            or run_dir in resolved_path.parents
+            or resolved_path in run_dir.parents
+        ):
+            raise ValueError(
+                "Protected skill sources and run directories must be separate"
+            )
+        skill_name, _, _ = parse_skill_md(resolved_path)
+        skill_names.add(validate_skill_name(skill_name))
+        for path in (lexical_path, resolved_path):
+            roots[str(path)] = path
+
+    if skill_names:
+        for skill_file in discover_global_skill_files():
+            try:
+                global_name, _, _ = parse_skill_md(skill_file.parent)
+                global_name = validate_skill_name(global_name)
+            except (OSError, ValueError):
+                continue
+            if global_name not in skill_names:
+                continue
+            for path in (skill_file.parent.absolute(), skill_file.parent.resolve()):
+                roots[str(path)] = path
+
+    return sorted(roots.values(), key=str)
+
+
+def _path_needles(path: Path) -> set[str]:
+    """Return common textual forms a tool trace may use for one path."""
+    needles = {str(path)}
+    home = Path.home().resolve()
+    try:
+        relative = path.resolve().relative_to(home).as_posix()
+    except ValueError:
+        return needles
+    needles.update({
+        f"~/{relative}",
+        f"$HOME/{relative}",
+        f"${{HOME}}/{relative}",
+    })
+    return needles
+
+
+def audit_trace_for_protected_sources(
+    trace_path: Path,
+    protected_roots: list[Path],
+) -> list[dict]:
+    """Find tool activity that disclosed or used protected skill sources."""
+    if not protected_roots:
+        return []
+
+    roots_and_needles = [
+        (root, _path_needles(root))
+        for root in protected_roots
+    ]
+    violations = []
+    seen = set()
+    for line_number, event in enumerate(load_jsonl(trace_path), start=1):
+        if event.get("type") not in {"item.started", "item.completed"}:
+            continue
+        item = event.get("item", {})
+        item_type = item.get("type", "unknown")
+        if item_type in {"agent_message", "reasoning"}:
+            continue
+        payload = json.dumps(item, ensure_ascii=False, sort_keys=True)
+        item_id = str(item.get("id", line_number))
+        for root, needles in roots_and_needles:
+            if not any(needle and needle in payload for needle in needles):
+                continue
+            key = (item_id, str(root))
+            if key in seen:
+                continue
+            seen.add(key)
+            violations.append({
+                "event_line": line_number,
+                "item_type": item_type,
+                "protected_root": str(root),
+            })
+    return violations
+
+
+def mark_run_contaminated(
+    metrics_path: Path,
+    timing_path: Path,
+    violations: list[dict],
+) -> None:
+    """Persist isolation evidence and make completed runs ungradable."""
+    for path in (metrics_path, timing_path):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["isolation_violations"] = violations
+        if data.get("run_status") == "completed":
+            data["run_status"] = "contaminated"
+            if path == metrics_path:
+                data["errors_encountered"] = (
+                    data.get("errors_encountered", 0) + 1
+                )
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
 def prepare_run_directory(
@@ -107,19 +234,21 @@ def prepare_run_directory(
     return trace_path, output_path
 
 
-def run_test_case(
-    run_dir: Path,
-    prompt: str,
-    skill_path: Path | None = None,
-    model: str | None = None,
-) -> int:
-    """Run one test case, then write its trace, metrics, and timing artifacts."""
-    run_dir = run_dir.resolve()
-    validate_run_directory(run_dir)
+def run_test_case(run_dir: Path) -> int:
+    """Execute one prepared run using only its enclosing manifests."""
+    context = load_run_context(run_dir)
+    run_dir = context.run_dir
     require_codex_cli()
-    trace_path, output_path = prepare_run_directory(run_dir, skill_path)
-    command = build_test_command(run_dir, output_path, model)
-    test_prompt = build_test_prompt(prompt)
+    protected_roots = collect_protected_skill_roots(
+        run_dir,
+        list(context.protected_skill_paths),
+    )
+    trace_path, output_path = prepare_run_directory(
+        run_dir,
+        context.skill_path,
+    )
+    command = build_test_command(run_dir, output_path, context.model)
+    test_prompt = build_test_prompt(context.eval_metadata["prompt"])
 
     started_at = time.monotonic()
     with trace_path.open("x", encoding="utf-8") as trace_file:
@@ -135,12 +264,20 @@ def run_test_case(
     missing_final = exit_code == 0 and not output_path.is_file()
     if missing_final:
         exit_code = 1
-    write_run_metrics(
+    metrics_path, timing_path = write_run_metrics(
         trace_path,
         run_dir,
         duration_seconds=duration_seconds,
         exit_code=exit_code,
     )
+    violations = audit_trace_for_protected_sources(
+        trace_path,
+        protected_roots,
+    )
+    if violations:
+        mark_run_contaminated(metrics_path, timing_path, violations)
+        if exit_code == 0:
+            exit_code = ISOLATION_VIOLATION_EXIT_CODE
     if missing_final:
         raise RuntimeError(
             "codex exec exited successfully but did not write "
@@ -149,44 +286,19 @@ def run_test_case(
     return exit_code
 
 
-def load_prompt(prompt: str | None, prompt_file: str | None) -> str:
-    """Load a prompt from exactly one supported CLI source."""
-    if prompt is not None:
-        return prompt
-    assert prompt_file is not None
-    return Path(prompt_file).read_text(encoding="utf-8")
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run one isolated full skill test case",
     )
     parser.add_argument(
-        "--run-dir",
-        required=True,
-        help="Fresh run directory for trace, outputs, metrics, and timing",
+        "run_dir",
+        type=Path,
+        help="Prepared run directory below an iteration manifest",
     )
-    prompt_group = parser.add_mutually_exclusive_group(required=True)
-    prompt_group.add_argument("--prompt", help="Test prompt text")
-    prompt_group.add_argument(
-        "--prompt-file",
-        help="UTF-8 file containing the prompt",
-    )
-    parser.add_argument(
-        "--skill-path",
-        default=None,
-        help="Skill version to install; omit for a no-skill baseline",
-    )
-    parser.add_argument("--model", default=None, help="Optional Codex model")
     args = parser.parse_args()
 
     try:
-        return run_test_case(
-            Path(args.run_dir),
-            load_prompt(args.prompt, args.prompt_file),
-            Path(args.skill_path) if args.skill_path else None,
-            args.model,
-        )
+        return run_test_case(args.run_dir)
     except (OSError, RuntimeError, ValueError) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Generate and serve a review page for eval results.
+"""Generate a static review page for one manifest-driven eval iteration.
 
-Reads the workspace directory, discovers runs (directories with outputs/),
-embeds all output data into a self-contained HTML page, and serves it via
-a tiny HTTP server. Feedback auto-saves to feedback.json in the workspace.
+Reads iteration.json, embeds the declared run outputs and benchmark into a
+self-contained review.html, and automatically includes the previous iteration
+when the manifest records one.
 
 Usage:
-    python generate_review.py <workspace-path> [--port PORT] [--skill-name NAME]
-    python generate_review.py <workspace-path> --previous-feedback /path/to/old/feedback.json
+    python generate_review.py <iteration-dir>
 
 No dependencies beyond the Python stdlib are required.
 """
@@ -16,16 +15,15 @@ import argparse
 import base64
 import json
 import mimetypes
-import os
 import re
-import signal
-import subprocess
 import sys
-import time
-import webbrowser
-from functools import partial
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+
+SKILL_ROOT = Path(__file__).resolve().parent.parent
+if str(SKILL_ROOT) not in sys.path:
+    sys.path.insert(0, str(SKILL_ROOT))
+
+from scripts.eval_manifest import EVAL_METADATA, load_iteration_manifest
 
 # Files to exclude from output listings
 METADATA_FILES = {"transcript.md", "user_notes.md", "metrics.json"}
@@ -57,45 +55,21 @@ def get_mime_type(path: Path) -> str:
     return mime or "application/octet-stream"
 
 
-def find_runs(workspace: Path) -> list[dict]:
-    """Recursively find directories that contain an outputs/ subdirectory."""
+def find_runs(iteration_dir: Path) -> list[dict]:
+    """Load runs in the exact order declared by iteration.json."""
+    iteration_dir = iteration_dir.resolve()
+    manifest = load_iteration_manifest(iteration_dir)
     runs: list[dict] = []
-    _find_runs_recursive(workspace, workspace, runs)
-    runs.sort(key=lambda r: (r.get("eval_id", float("inf")), r["id"]))
+    for eval_entry in manifest["evals"]:
+        eval_dir = iteration_dir / eval_entry["directory"]
+        for configuration in manifest["configurations"]:
+            for run_number in range(1, manifest["runs"] + 1):
+                run_dir = eval_dir / configuration / f"run-{run_number}"
+                if (run_dir / "outputs").is_dir():
+                    run = build_run(iteration_dir, run_dir)
+                    if run:
+                        runs.append(run)
     return runs
-
-
-def _find_runs_recursive(root: Path, current: Path, runs: list[dict]) -> None:
-    if not current.is_dir():
-        return
-
-    outputs_dir = current / "outputs"
-    if outputs_dir.is_dir():
-        run = build_run(root, current)
-        if run:
-            runs.append(run)
-        return
-
-    skip = {"node_modules", ".git", "__pycache__", "skill", "inputs"}
-    for child in sorted(current.iterdir()):
-        if child.is_dir() and child.name not in skip:
-            _find_runs_recursive(root, child, runs)
-
-
-def find_nearest_file(start: Path, root: Path, filename: str) -> Path | None:
-    """Find the closest ancestor file without walking above the workspace."""
-    current = start
-    while True:
-        candidate = current / filename
-        if candidate.is_file():
-            return candidate
-        if current == root:
-            return None
-        try:
-            current.relative_to(root)
-        except ValueError:
-            return None
-        current = current.parent
 
 
 def build_run(root: Path, run_dir: Path) -> dict | None:
@@ -103,11 +77,8 @@ def build_run(root: Path, run_dir: Path) -> dict | None:
     prompt = ""
     eval_id = None
 
-    # The canonical layout is eval/config/run-N, but legacy workspaces may put
-    # outputs directly under config. Walk upward so both layouts resolve the
-    # nearest eval_metadata.json.
-    metadata_path = find_nearest_file(run_dir, root, "eval_metadata.json")
-    if metadata_path:
+    metadata_path = run_dir.parent.parent / EVAL_METADATA
+    if metadata_path.is_file():
         try:
             metadata = json.loads(metadata_path.read_text())
             prompt = metadata.get("prompt", "")
@@ -297,191 +268,48 @@ def generate_html(
     return template.replace("/*__EMBEDDED_DATA__*/", f"const EMBEDDED_DATA = {data_json};")
 
 
-# ---------------------------------------------------------------------------
-# HTTP server (stdlib only, zero dependencies)
-# ---------------------------------------------------------------------------
-
-def _kill_port(port: int) -> None:
-    """Kill any process listening on the given port."""
-    try:
-        result = subprocess.run(
-            ["lsof", "-ti", f":{port}"],
-            capture_output=True, text=True, timeout=5,
-        )
-        for pid_str in result.stdout.strip().split("\n"):
-            if pid_str.strip():
-                try:
-                    os.kill(int(pid_str.strip()), signal.SIGTERM)
-                except (ProcessLookupError, ValueError):
-                    pass
-        if result.stdout.strip():
-            time.sleep(0.5)
-    except subprocess.TimeoutExpired:
-        pass
-    except FileNotFoundError:
-        print("Note: lsof not found, cannot check if port is in use", file=sys.stderr)
-
-class ReviewHandler(BaseHTTPRequestHandler):
-    """Serves the review HTML and handles feedback saves.
-
-    Regenerates the HTML on each page load so that refreshing the browser
-    picks up new eval outputs without restarting the server.
-    """
-
-    def __init__(
-        self,
-        workspace: Path,
-        skill_name: str,
-        feedback_path: Path,
-        previous: dict[str, dict],
-        benchmark_path: Path | None,
-        *args,
-        **kwargs,
-    ):
-        self.workspace = workspace
-        self.skill_name = skill_name
-        self.feedback_path = feedback_path
-        self.previous = previous
-        self.benchmark_path = benchmark_path
-        super().__init__(*args, **kwargs)
-
-    def do_GET(self) -> None:
-        if self.path == "/" or self.path == "/index.html":
-            # Regenerate HTML on each request (re-scans workspace for new outputs)
-            runs = find_runs(self.workspace)
-            benchmark = None
-            if self.benchmark_path and self.benchmark_path.exists():
-                try:
-                    benchmark = json.loads(self.benchmark_path.read_text())
-                except (json.JSONDecodeError, OSError):
-                    pass
-            html = generate_html(runs, self.skill_name, self.previous, benchmark)
-            content = html.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(content)))
-            self.end_headers()
-            self.wfile.write(content)
-        elif self.path == "/api/feedback":
-            data = b"{}"
-            if self.feedback_path.exists():
-                data = self.feedback_path.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-        else:
-            self.send_error(404)
-
-    def do_POST(self) -> None:
-        if self.path == "/api/feedback":
-            length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(length)
-            try:
-                data = json.loads(body)
-                if not isinstance(data, dict) or "reviews" not in data:
-                    raise ValueError("Expected JSON object with 'reviews' key")
-                self.feedback_path.write_text(json.dumps(data, indent=2) + "\n")
-                resp = b'{"ok":true}'
-                self.send_response(200)
-            except (json.JSONDecodeError, OSError, ValueError) as e:
-                resp = json.dumps({"error": str(e)}).encode()
-                self.send_response(500)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(resp)))
-            self.end_headers()
-            self.wfile.write(resp)
-        else:
-            self.send_error(404)
-
-    def log_message(self, format: str, *args: object) -> None:
-        # Suppress request logging to keep terminal clean
-        pass
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate and serve eval review")
-    parser.add_argument("workspace", type=Path, help="Path to workspace directory")
-    parser.add_argument("--port", "-p", type=int, default=3117, help="Server port (default: 3117)")
-    parser.add_argument("--skill-name", "-n", type=str, default=None, help="Skill name for header")
-    parser.add_argument(
-        "--previous-workspace", type=Path, default=None,
-        help="Path to previous iteration's workspace (shows old outputs and feedback as context)",
-    )
-    parser.add_argument(
-        "--benchmark", type=Path, default=None,
-        help="Path to benchmark.json to show in the Benchmark tab",
-    )
-    parser.add_argument(
-        "--static", "-s", type=Path, default=None,
-        help="Write standalone HTML to this path instead of starting a server",
-    )
-    args = parser.parse_args()
-
-    workspace = args.workspace.resolve()
-    if not workspace.is_dir():
-        print(f"Error: {workspace} is not a directory", file=sys.stderr)
-        sys.exit(1)
-
-    runs = find_runs(workspace)
+def generate_review(iteration_dir: Path) -> Path:
+    """Generate review.html from one iteration and its optional predecessor."""
+    iteration_dir = iteration_dir.resolve()
+    manifest = load_iteration_manifest(iteration_dir)
+    runs = find_runs(iteration_dir)
     if not runs:
-        print(f"No runs found in {workspace}", file=sys.stderr)
-        sys.exit(1)
-
-    skill_name = args.skill_name or workspace.name.replace("-workspace", "")
-    feedback_path = workspace / "feedback.json"
+        raise ValueError(f"No completed run outputs found in {iteration_dir}")
 
     previous: dict[str, dict] = {}
-    if args.previous_workspace:
-        previous = load_previous_iteration(args.previous_workspace.resolve())
+    previous_name = manifest.get("previous_iteration")
+    if previous_name:
+        previous_path = iteration_dir.parent / previous_name
+        if previous_path.is_dir():
+            previous = load_previous_iteration(previous_path)
 
-    benchmark_path = args.benchmark.resolve() if args.benchmark else None
     benchmark = None
-    if benchmark_path and benchmark_path.exists():
-        try:
-            benchmark = json.loads(benchmark_path.read_text())
-        except (json.JSONDecodeError, OSError):
-            pass
+    benchmark_path = iteration_dir / "benchmark.json"
+    if benchmark_path.is_file():
+        benchmark = json.loads(benchmark_path.read_text(encoding="utf-8"))
 
-    if args.static:
-        html = generate_html(runs, skill_name, previous, benchmark)
-        args.static.parent.mkdir(parents=True, exist_ok=True)
-        args.static.write_text(html)
-        print(f"\n  Static viewer written to: {args.static}\n")
-        sys.exit(0)
+    output_path = iteration_dir / "review.html"
+    output_path.write_text(
+        generate_html(runs, manifest["skill_name"], previous, benchmark),
+        encoding="utf-8",
+    )
+    return output_path
 
-    # Kill any existing process on the target port
-    port = args.port
-    _kill_port(port)
-    handler = partial(ReviewHandler, workspace, skill_name, feedback_path, previous, benchmark_path)
-    try:
-        server = HTTPServer(("127.0.0.1", port), handler)
-    except OSError:
-        # Port still in use after kill attempt — find a free one
-        server = HTTPServer(("127.0.0.1", 0), handler)
-        port = server.server_address[1]
 
-    url = f"http://localhost:{port}"
-    print(f"\n  Eval Viewer")
-    print(f"  ─────────────────────────────────")
-    print(f"  URL:       {url}")
-    print(f"  Workspace: {workspace}")
-    print(f"  Feedback:  {feedback_path}")
-    if previous:
-        print(f"  Previous:  {args.previous_workspace} ({len(previous)} runs)")
-    if benchmark_path:
-        print(f"  Benchmark: {benchmark_path}")
-    print(f"\n  Press Ctrl+C to stop.\n")
-
-    webbrowser.open(url)
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Generate one static eval review")
+    parser.add_argument("iteration_dir", type=Path, help="Prepared iteration directory")
+    args = parser.parse_args()
 
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nStopped.")
-        server.server_close()
+        output_path = generate_review(args.iteration_dir)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
+
+    print(output_path)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

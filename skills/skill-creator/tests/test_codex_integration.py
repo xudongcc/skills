@@ -30,6 +30,15 @@ from scripts.create_eval_workspace import (
     create_eval_workspace,
     validate_run_directory,
 )
+from scripts.create_iteration import create_iteration
+from scripts.eval_manifest import (
+    CONFIG_NEW,
+    CONFIG_OLD,
+    CONFIG_WITHOUT,
+    ITERATION_MANIFEST,
+    load_iteration_manifest,
+    load_run_context,
+)
 from scripts.run_eval import (
     build_skill_fixture,
     output_shows_skill_load,
@@ -39,8 +48,13 @@ from scripts.run_eval import (
 from scripts.run_loop import run_loop, split_eval_set
 from scripts.run_test_case import (
     DELIVERABLE_INSTRUCTION,
+    EVALUATION_ISOLATION_INSTRUCTION,
+    ISOLATION_VIOLATION_EXIT_CODE,
     TEST_REASONING_CONFIG,
+    audit_trace_for_protected_sources,
     build_test_command,
+    build_test_prompt,
+    collect_protected_skill_roots,
     prepare_run_directory,
     run_test_case,
 )
@@ -55,6 +69,124 @@ VIEWER_SPEC = importlib.util.spec_from_file_location(
 VIEWER_MODULE = importlib.util.module_from_spec(VIEWER_SPEC)
 assert VIEWER_SPEC.loader is not None
 VIEWER_SPEC.loader.exec_module(VIEWER_MODULE)
+
+
+def create_eval_skill(parent: Path, body: str = "# Example\n") -> Path:
+    """Create a minimal skill with one manifest-ready eval."""
+    skill_path = parent / "example-skill"
+    skill_path.mkdir(parents=True)
+    (skill_path / "SKILL.md").write_text(
+        "---\n"
+        "name: example-skill\n"
+        "description: Use for example tasks.\n"
+        "---\n\n"
+        f"{body}",
+        encoding="utf-8",
+    )
+    evals_dir = skill_path / "evals"
+    evals_dir.mkdir()
+    (evals_dir / "evals.json").write_text(
+        json.dumps({
+            "skill_name": "example-skill",
+            "evals": [{
+                "id": 7,
+                "name": "complete-example-task",
+                "prompt": "Complete the example task",
+                "expected_output": "A complete result",
+                "files": [],
+                "expectations": ["The output is complete"],
+            }],
+        }),
+        encoding="utf-8",
+    )
+    return skill_path
+
+
+def prepare_iteration(
+    root: Path,
+    *,
+    baseline: str = "none",
+    runs: int = 1,
+    model: str = "test-model",
+) -> tuple[Path, Path, Path]:
+    source_skill = create_eval_skill(root / "source")
+    temp_parent = root / "system-temp"
+    temp_parent.mkdir()
+    workspace = create_eval_workspace(source_skill, temp_parent=temp_parent)
+    iteration = create_iteration(
+        workspace,
+        baseline=baseline,
+        runs=runs,
+        model=model,
+    )
+    return source_skill, workspace, iteration
+
+
+def write_completed_result(
+    run_dir: Path,
+    *,
+    status: str = "completed",
+    pass_rate: float = 1.0,
+) -> None:
+    outputs_dir = run_dir / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "trace.jsonl").write_text("", encoding="utf-8")
+    (outputs_dir / "final.md").write_text("Done", encoding="utf-8")
+    (outputs_dir / "metrics.json").write_text(
+        json.dumps({
+            "run_status": status,
+            "exit_code": 0,
+            "total_tool_calls": 4,
+            "errors_encountered": 0 if status == "completed" else 1,
+            "total_tokens": 4321,
+        }),
+        encoding="utf-8",
+    )
+    (run_dir / "timing.json").write_text(
+        json.dumps({
+            "run_status": status,
+            "exit_code": 0,
+            "total_duration_seconds": 12.5,
+            "total_tokens": 4321,
+        }),
+        encoding="utf-8",
+    )
+    (run_dir / "grading.json").write_text(
+        json.dumps({
+            "expectations": [{
+                "text": "The output is complete",
+                "passed": pass_rate == 1.0,
+                "evidence": "Observed output",
+            }],
+            "summary": {
+                "passed": 1 if pass_rate == 1.0 else 0,
+                "failed": 0 if pass_rate == 1.0 else 1,
+                "total": 1,
+                "pass_rate": pass_rate,
+            },
+            "claims": [],
+            "user_notes_summary": {
+                "uncertainties": [],
+                "needs_review": [],
+                "workarounds": [],
+            },
+            "eval_feedback": {"suggestions": [], "overall": ""},
+        }),
+        encoding="utf-8",
+    )
+
+
+def iteration_run_dirs(iteration: Path) -> list[Path]:
+    manifest = load_iteration_manifest(iteration)
+    return [
+        iteration
+        / eval_entry["directory"]
+        / configuration
+        / f"run-{run_number}"
+        for eval_entry in manifest["evals"]
+        for configuration in manifest["configurations"]
+        for run_number in range(1, manifest["runs"] + 1)
+    ]
 
 
 class TriggerDetectionTests(unittest.TestCase):
@@ -314,6 +446,10 @@ class EvalWorkspaceTests(unittest.TestCase):
             self.assertEqual(metadata["schema_version"], 1)
             self.assertEqual(metadata["skill_name"], "example-skill")
             self.assertEqual(metadata["source_skill"], str(skill_path.resolve()))
+            self.assertEqual(
+                metadata["source_skill_lexical"],
+                str(skill_path.absolute()),
+            )
             self.assertEqual(validate_run_directory(run_dir), workspace)
 
     def test_rejects_workspace_inside_git_repository(self):
@@ -389,7 +525,209 @@ class EvalWorkspaceTests(unittest.TestCase):
             self.assertEqual(validate_run_directory(run_dir), workspace)
 
 
+class IterationManifestTests(unittest.TestCase):
+    def test_prepares_snapshots_metadata_and_all_declared_runs(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source, workspace, iteration = prepare_iteration(root, runs=3)
+            manifest = load_iteration_manifest(iteration)
+
+            self.assertEqual(iteration.parent, workspace)
+            self.assertTrue((iteration / ITERATION_MANIFEST).is_file())
+            self.assertEqual(manifest["runs"], 3)
+            self.assertEqual(
+                manifest["configurations"],
+                [CONFIG_NEW, CONFIG_WITHOUT],
+            )
+            self.assertEqual(manifest["baseline"]["kind"], "none")
+            self.assertTrue(
+                (iteration / manifest["candidate"]["snapshot"] / "SKILL.md").is_file()
+            )
+            self.assertEqual(len(iteration_run_dirs(iteration)), 6)
+            self.assertTrue(all(path.is_dir() for path in iteration_run_dirs(iteration)))
+            self.assertEqual(
+                json.loads(
+                    (iteration / manifest["evals"][0]["directory"] / "eval_metadata.json")
+                    .read_text(encoding="utf-8")
+                )["prompt"],
+                "Complete the example task",
+            )
+            self.assertEqual(
+                (source / "SKILL.md").read_text(encoding="utf-8"),
+                (
+                    iteration
+                    / manifest["candidate"]["snapshot"]
+                    / "SKILL.md"
+                ).read_text(encoding="utf-8"),
+            )
+
+    def test_previous_baseline_snapshots_prior_candidate(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source, workspace, first = prepare_iteration(root)
+            first_manifest = load_iteration_manifest(first)
+            previous_content = (
+                first / first_manifest["candidate"]["snapshot"] / "SKILL.md"
+            ).read_text(encoding="utf-8")
+            (source / "SKILL.md").write_text(
+                "---\nname: example-skill\n"
+                "description: Use for example tasks.\n---\n\n# Revised\n",
+                encoding="utf-8",
+            )
+
+            second = create_iteration(
+                workspace,
+                baseline="previous",
+                runs=1,
+                model="test-model",
+            )
+            manifest = load_iteration_manifest(second)
+            eval_dir = second / manifest["evals"][0]["directory"]
+            old_context = load_run_context(eval_dir / CONFIG_OLD / "run-1")
+
+            self.assertEqual(manifest["baseline"]["kind"], "previous")
+            self.assertEqual(manifest["baseline"]["source_iteration"], "iteration-1")
+            self.assertEqual(manifest["previous_iteration"], "iteration-1")
+            self.assertEqual(
+                (old_context.skill_path / "SKILL.md").read_text(encoding="utf-8"),
+                previous_content,
+            )
+            self.assertNotEqual(
+                (old_context.skill_path / "SKILL.md").read_text(encoding="utf-8"),
+                (
+                    second
+                    / manifest["candidate"]["snapshot"]
+                    / "SKILL.md"
+                ).read_text(encoding="utf-8"),
+            )
+
+    def test_path_baseline_is_snapshotted_and_recorded(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = create_eval_skill(root / "source", "# Candidate\n")
+            baseline = create_eval_skill(root / "baseline", "# Baseline\n")
+            temp_parent = root / "system-temp"
+            temp_parent.mkdir()
+            workspace = create_eval_workspace(source, temp_parent=temp_parent)
+
+            iteration = create_iteration(
+                workspace,
+                baseline=str(baseline),
+                runs=1,
+                model="test-model",
+            )
+            manifest = load_iteration_manifest(iteration)
+            old_snapshot = iteration / manifest["baseline"]["snapshot"]
+
+            self.assertEqual(manifest["baseline"]["kind"], "path")
+            self.assertEqual(manifest["baseline"]["configuration"], CONFIG_OLD)
+            self.assertEqual(manifest["baseline"]["source"], str(baseline.resolve()))
+            self.assertIn("# Baseline", (old_snapshot / "SKILL.md").read_text())
+            self.assertEqual(
+                manifest["configurations"],
+                [CONFIG_NEW, CONFIG_OLD],
+            )
+
+    def test_run_context_derives_inputs_without_cli_configuration(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source, _, iteration = prepare_iteration(root, model="gpt-5.6-sol")
+            manifest = load_iteration_manifest(iteration)
+            run_dir = (
+                iteration
+                / manifest["evals"][0]["directory"]
+                / CONFIG_WITHOUT
+                / "run-1"
+            )
+
+            context = load_run_context(run_dir)
+
+            self.assertIsNone(context.skill_path)
+            self.assertEqual(context.model, "gpt-5.6-sol")
+            self.assertEqual(context.eval_metadata["expectations"], [
+                "The output is complete"
+            ])
+            self.assertIn(source.resolve(), context.protected_skill_paths)
+            self.assertIn(
+                (iteration / manifest["candidate"]["snapshot"]).resolve(),
+                context.protected_skill_paths,
+            )
+
+    def test_rejects_previous_baseline_without_an_iteration(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = create_eval_skill(root / "source")
+            temp_parent = root / "system-temp"
+            temp_parent.mkdir()
+            workspace = create_eval_workspace(source, temp_parent=temp_parent)
+
+            with self.assertRaisesRegex(ValueError, "requires an existing iteration"):
+                create_iteration(
+                    workspace,
+                    baseline="previous",
+                    runs=1,
+                    model="test-model",
+                )
+
+            self.assertFalse(list(workspace.glob("iteration-*")))
+
+    def test_manifest_rejects_undeclared_run_directories(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _, _, iteration = prepare_iteration(Path(temp_dir))
+            manifest = load_iteration_manifest(iteration)
+            extra = (
+                iteration
+                / manifest["evals"][0]["directory"]
+                / CONFIG_NEW
+                / "run-2"
+            )
+            extra.mkdir()
+
+            with self.assertRaisesRegex(ValueError, "do not match iteration.json"):
+                load_iteration_manifest(iteration)
+
+
+class ManifestCliTests(unittest.TestCase):
+    def test_runtime_scripts_expose_only_one_position_argument(self):
+        scripts = [
+            SKILL_ROOT / "scripts" / "run_test_case.py",
+            SKILL_ROOT / "scripts" / "run_grader.py",
+            SKILL_ROOT / "scripts" / "aggregate_benchmark.py",
+            SKILL_ROOT / "eval-viewer" / "generate_review.py",
+        ]
+        removed_options = [
+            "--run-dir",
+            "--skill-path",
+            "--protected-skill-path",
+            "--model",
+            "--prompt",
+            "--prompt-file",
+            "--eval-metadata",
+            "--output",
+            "--benchmark",
+            "--previous-workspace",
+            "--static",
+        ]
+
+        for script in scripts:
+            with self.subTest(script=script.name):
+                result = subprocess.run(
+                    [sys.executable, str(script), "--help"],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                for option in removed_options:
+                    self.assertNotIn(option, result.stdout)
+
+
 class TestCaseRunnerTests(unittest.TestCase):
+    def test_prompt_applies_same_read_isolation_contract(self):
+        prompt = build_test_prompt("Complete the example task")
+
+        self.assertIn(EVALUATION_ISOLATION_INSTRUCTION, prompt)
+        self.assertTrue(prompt.endswith(DELIVERABLE_INSTRUCTION))
+
     def test_builds_medium_workspace_command(self):
         run_dir = Path("/tmp/skill-creator/eval/with_skill/run-1")
         output_path = run_dir / "outputs" / "final.md"
@@ -439,6 +777,127 @@ class TestCaseRunnerTests(unittest.TestCase):
                 [],
             )
 
+    def test_trace_audit_detects_external_skill_source(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            protected = root / "source" / "example-skill"
+            protected.mkdir(parents=True)
+            (protected / "SKILL.md").write_text(
+                "---\nname: example-skill\ndescription: Example.\n---\n",
+                encoding="utf-8",
+            )
+            run_dir = root / "workspace" / "run-1"
+            run_dir.mkdir(parents=True)
+            trace_path = run_dir / "trace.jsonl"
+            trace_path.write_text(
+                json.dumps({
+                    "type": "item.completed",
+                    "item": {
+                        "id": "item-1",
+                        "type": "command_execution",
+                        "command": f"sed -n 1,200p {protected}/SKILL.md",
+                        "status": "completed",
+                    },
+                }) + "\n",
+                encoding="utf-8",
+            )
+
+            roots = collect_protected_skill_roots(run_dir, [protected])
+            violations = audit_trace_for_protected_sources(trace_path, roots)
+
+        self.assertEqual(len(violations), 1)
+        self.assertEqual(violations[0]["item_type"], "command_execution")
+        self.assertIn(
+            violations[0]["protected_root"],
+            {str(protected.absolute()), str(protected.resolve())},
+        )
+
+    @patch("scripts.run_test_case.discover_global_skill_files")
+    def test_protects_global_alias_by_frontmatter_name(self, discover_mock):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "source" / "example-skill"
+            source.mkdir(parents=True)
+            (source / "SKILL.md").write_text(
+                "---\nname: example-skill\ndescription: Example.\n---\n",
+                encoding="utf-8",
+            )
+            global_alias = root / "global" / "renamed-directory"
+            global_alias.mkdir(parents=True)
+            global_file = global_alias / "SKILL.md"
+            global_file.write_text(
+                "---\nname: example-skill\ndescription: Global.\n---\n",
+                encoding="utf-8",
+            )
+            discover_mock.return_value = [global_file]
+            run_dir = root / "workspace" / "run-1"
+
+            protected = collect_protected_skill_roots(run_dir, [source])
+
+        self.assertIn(global_alias.absolute(), protected)
+
+    def test_trace_audit_allows_installed_run_copy(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            protected = root / "source" / "example-skill"
+            protected.mkdir(parents=True)
+            (protected / "SKILL.md").write_text(
+                "---\nname: example-skill\ndescription: Example.\n---\n",
+                encoding="utf-8",
+            )
+            run_dir = root / "workspace" / "run-1"
+            local_skill = run_dir / ".agents/skills/example-skill/SKILL.md"
+            local_skill.parent.mkdir(parents=True)
+            local_skill.write_text("local copy", encoding="utf-8")
+            trace_path = run_dir / "trace.jsonl"
+            trace_path.write_text(
+                json.dumps({
+                    "type": "item.completed",
+                    "item": {
+                        "id": "item-1",
+                        "type": "command_execution",
+                        "command": (
+                            "sed -n 1,200p "
+                            ".agents/skills/example-skill/SKILL.md"
+                        ),
+                        "status": "completed",
+                    },
+                }) + "\n",
+                encoding="utf-8",
+            )
+
+            roots = collect_protected_skill_roots(run_dir, [protected])
+            violations = audit_trace_for_protected_sources(trace_path, roots)
+
+        self.assertEqual(violations, [])
+
+    def test_trace_audit_does_not_confuse_local_copy_with_global_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            trace_path = Path(temp_dir) / "trace.jsonl"
+            trace_path.write_text(
+                json.dumps({
+                    "type": "item.completed",
+                    "item": {
+                        "id": "item-1",
+                        "type": "command_execution",
+                        "command": (
+                            "sed -n 1,200p "
+                            ".agents/skills/skill-creator/SKILL.md"
+                        ),
+                        "status": "completed",
+                    },
+                }) + "\n",
+                encoding="utf-8",
+            )
+            global_copy = Path.home() / ".agents/skills/skill-creator"
+
+            violations = audit_trace_for_protected_sources(
+                trace_path,
+                [global_copy],
+            )
+
+        self.assertEqual(violations, [])
+
     def test_rejects_skill_name_that_escapes_fixture_root(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -480,30 +939,17 @@ class TestCaseRunnerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            skill_path = root / "example-skill"
-            skill_path.mkdir()
-            (skill_path / "SKILL.md").write_text(
-                "---\n"
-                "name: example-skill\n"
-                "description: Use for example tasks.\n"
-                "---\n",
-                encoding="utf-8",
+            _, _, iteration = prepare_iteration(root)
+            manifest = load_iteration_manifest(iteration)
+            run_dir = (
+                iteration
+                / manifest["evals"][0]["directory"]
+                / CONFIG_NEW
+                / "run-1"
             )
-            temp_parent = root / "system-temp"
-            temp_parent.mkdir()
-            workspace = create_eval_workspace(
-                skill_path,
-                temp_parent=temp_parent,
-            )
-            run_dir = workspace / "with_skill" / "run-1"
 
             self.assertEqual(
-                run_test_case(
-                    run_dir,
-                    "Complete the example task",
-                    skill_path=skill_path,
-                    model="test-model",
-                ),
+                run_test_case(run_dir),
                 0,
             )
 
@@ -537,6 +983,56 @@ class TestCaseRunnerTests(unittest.TestCase):
             run_mock.call_args.kwargs["input"].endswith(DELIVERABLE_INSTRUCTION)
         )
         self.assertNotIn("env", run_mock.call_args.kwargs)
+
+    @patch("scripts.run_test_case.subprocess.run")
+    @patch("scripts.run_test_case.require_codex_cli")
+    def test_source_read_marks_run_contaminated(
+        self,
+        _require_mock,
+        run_mock,
+    ):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            skill_path, _, iteration = prepare_iteration(root)
+            manifest = load_iteration_manifest(iteration)
+            run_dir = (
+                iteration
+                / manifest["evals"][0]["directory"]
+                / CONFIG_WITHOUT
+                / "run-1"
+            )
+
+            def fake_codex(command, **kwargs):
+                kwargs["stdout"].write(json.dumps({
+                    "type": "item.completed",
+                    "item": {
+                        "id": "item-1",
+                        "type": "command_execution",
+                        "command": f"cat {skill_path}/SKILL.md",
+                        "status": "completed",
+                    },
+                }) + "\n")
+                kwargs["stdout"].write(json.dumps({
+                    "type": "turn.completed",
+                    "usage": {"input_tokens": 10, "output_tokens": 5},
+                }) + "\n")
+                output_path = Path(command[command.index("-o") + 1])
+                output_path.write_text("Done", encoding="utf-8")
+                return subprocess.CompletedProcess(command, returncode=0)
+
+            run_mock.side_effect = fake_codex
+            exit_code = run_test_case(run_dir)
+            metrics = json.loads(
+                (run_dir / "outputs/metrics.json").read_text(encoding="utf-8")
+            )
+            timing = json.loads(
+                (run_dir / "timing.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(exit_code, ISOLATION_VIOLATION_EXIT_CODE)
+        self.assertEqual(metrics["run_status"], "contaminated")
+        self.assertEqual(timing["run_status"], "contaminated")
+        self.assertEqual(len(metrics["isolation_violations"]), 1)
 
 
 class SkillNameValidationTests(unittest.TestCase):
@@ -603,9 +1099,16 @@ class GraderWrapperTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            run_dir = root / "run"
+            _, _, iteration = prepare_iteration(root)
+            manifest = load_iteration_manifest(iteration)
+            run_dir = (
+                iteration
+                / manifest["evals"][0]["directory"]
+                / CONFIG_NEW
+                / "run-1"
+            )
             outputs_dir = run_dir / "outputs"
-            outputs_dir.mkdir(parents=True)
+            outputs_dir.mkdir(parents=True, exist_ok=True)
             (run_dir / "trace.jsonl").write_text("", encoding="utf-8")
             (outputs_dir / "final.md").write_text("Done", encoding="utf-8")
             (outputs_dir / "metrics.json").write_text(
@@ -616,24 +1119,27 @@ class GraderWrapperTests(unittest.TestCase):
                 json.dumps({"run_status": "completed", "exit_code": 0}),
                 encoding="utf-8",
             )
-            metadata_path = root / "eval_metadata.json"
-            metadata_path.write_text(
-                json.dumps({"expectations": ["The output is complete"]}),
-                encoding="utf-8",
-            )
-
-            self.assertEqual(run_grader(run_dir, metadata_path), 0)
+            self.assertEqual(run_grader(run_dir), 0)
 
         self.assertNotIn("env", run_mock.call_args.kwargs)
+        command = run_mock.call_args.args[0]
+        self.assertEqual(command[command.index("--model") + 1], "test-model")
 
     @patch("scripts.run_grader.subprocess.run")
     @patch("scripts.run_grader.require_codex_cli")
     def test_grader_rejects_incomplete_run(self, require_mock, run_mock):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            run_dir = root / "run"
+            _, _, iteration = prepare_iteration(root)
+            manifest = load_iteration_manifest(iteration)
+            run_dir = (
+                iteration
+                / manifest["evals"][0]["directory"]
+                / CONFIG_NEW
+                / "run-1"
+            )
             outputs_dir = run_dir / "outputs"
-            outputs_dir.mkdir(parents=True)
+            outputs_dir.mkdir(parents=True, exist_ok=True)
             (run_dir / "trace.jsonl").write_text("", encoding="utf-8")
             (outputs_dir / "final.md").write_text("Done", encoding="utf-8")
             (outputs_dir / "metrics.json").write_text(
@@ -644,14 +1150,26 @@ class GraderWrapperTests(unittest.TestCase):
                 json.dumps({"run_status": "incomplete", "exit_code": 0}),
                 encoding="utf-8",
             )
-            metadata_path = root / "eval_metadata.json"
-            metadata_path.write_text(
-                json.dumps({"expectations": ["The output is complete"]}),
-                encoding="utf-8",
-            )
+            with self.assertRaisesRegex(ValueError, "not completed successfully"):
+                run_grader(run_dir)
+
+        require_mock.assert_not_called()
+        run_mock.assert_not_called()
+
+    @patch("scripts.run_grader.subprocess.run")
+    @patch("scripts.run_grader.require_codex_cli")
+    def test_grader_rejects_contaminated_evidence(self, require_mock, run_mock):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _, _, iteration = prepare_iteration(Path(temp_dir))
+            run_dir = iteration_run_dirs(iteration)[0]
+            write_completed_result(run_dir)
+            metrics_path = run_dir / "outputs" / "metrics.json"
+            metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+            metrics["isolation_violations"] = [{"protected_root": "/source"}]
+            metrics_path.write_text(json.dumps(metrics), encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "not completed successfully"):
-                run_grader(run_dir, metadata_path)
+                run_grader(run_dir)
 
         require_mock.assert_not_called()
         run_mock.assert_not_called()
@@ -749,143 +1267,74 @@ class BenchmarkAggregationTests(unittest.TestCase):
 
     def test_reads_deterministic_metrics_and_timing_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            benchmark_dir = Path(temp_dir)
-            eval_dir = benchmark_dir / "eval-0"
-            run_dir = eval_dir / "with_skill" / "run-1"
-            outputs_dir = run_dir / "outputs"
-            outputs_dir.mkdir(parents=True)
+            root = Path(temp_dir)
+            _, _, iteration = prepare_iteration(root)
+            for run_dir in iteration_run_dirs(iteration):
+                write_completed_result(run_dir)
 
-            (eval_dir / "eval_metadata.json").write_text(
-                json.dumps({"eval_id": 7}),
-                encoding="utf-8",
-            )
-            (run_dir / "grading.json").write_text(
-                json.dumps({
-                    "expectations": [],
-                    "summary": {
-                        "passed": 0,
-                        "failed": 0,
-                        "total": 0,
-                        "pass_rate": 0,
-                    },
-                    "claims": [],
-                    "user_notes_summary": {
-                        "uncertainties": [],
-                        "needs_review": [],
-                        "workarounds": [],
-                    },
-                    "eval_feedback": {"suggestions": [], "overall": ""},
-                }),
-                encoding="utf-8",
-            )
-            (run_dir / "timing.json").write_text(
-                json.dumps({
-                    "total_duration_seconds": 12.5,
-                    "total_tokens": 4321,
-                    "run_status": "completed",
-                    "exit_code": 0,
-                }),
-                encoding="utf-8",
-            )
-            (outputs_dir / "metrics.json").write_text(
-                json.dumps({
-                    "total_tool_calls": 4,
-                    "errors_encountered": 1,
-                    "run_status": "completed",
-                    "exit_code": 0,
-                }),
-                encoding="utf-8",
-            )
+            results = load_run_results(iteration)
 
-            results = load_run_results(benchmark_dir)
-
-        run = results["with_skill"][0]
+        run = results[CONFIG_NEW][0]
         self.assertEqual(run["eval_id"], 7)
+        self.assertEqual(run["eval_name"], "complete-example-task")
         self.assertEqual(run["time_seconds"], 12.5)
         self.assertEqual(run["tokens"], 4321)
         self.assertEqual(run["tool_calls"], 4)
-        self.assertEqual(run["errors"], 1)
+        self.assertEqual(run["errors"], 0)
 
     def test_benchmark_reports_actual_run_count(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            benchmark_dir = Path(temp_dir)
-            run_dir = benchmark_dir / "eval-0" / "with_skill" / "run-1"
-            outputs_dir = run_dir / "outputs"
-            outputs_dir.mkdir(parents=True)
-            (run_dir / "grading.json").write_text(json.dumps({
-                "expectations": [],
-                "summary": {
-                    "passed": 1,
-                    "failed": 0,
-                    "total": 1,
-                    "pass_rate": 1.0,
-                },
-                "user_notes_summary": {},
-            }))
-            (outputs_dir / "metrics.json").write_text(json.dumps({
-                "run_status": "completed",
-                "errors_encountered": 0,
-            }))
+            root = Path(temp_dir)
+            _, _, iteration = prepare_iteration(root, runs=2)
+            for run_dir in iteration_run_dirs(iteration):
+                write_completed_result(run_dir)
 
-            benchmark = generate_benchmark(benchmark_dir)
+            benchmark = generate_benchmark(iteration)
 
-        self.assertEqual(benchmark["metadata"]["runs_per_configuration"], 1)
+        self.assertEqual(benchmark["metadata"]["runs_per_configuration"], 2)
         self.assertEqual(
             benchmark["metadata"]["run_counts_by_configuration"],
-            {"with_skill": {"0": 1}},
+            {
+                CONFIG_NEW: {"7": 2},
+                CONFIG_WITHOUT: {"7": 2},
+            },
         )
+        self.assertEqual(benchmark["metadata"]["executor_model"], "test-model")
 
     def test_aggregator_rejects_incomplete_execution(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            benchmark_dir = Path(temp_dir)
-            run_dir = benchmark_dir / "eval-0" / "with_skill" / "run-1"
-            outputs_dir = run_dir / "outputs"
-            outputs_dir.mkdir(parents=True)
-            (run_dir / "grading.json").write_text(json.dumps({
-                "expectations": [],
-                "summary": {
-                    "passed": 1,
-                    "failed": 0,
-                    "total": 1,
-                    "pass_rate": 1.0,
-                },
-                "user_notes_summary": {},
-            }))
-            (outputs_dir / "metrics.json").write_text(json.dumps({
-                "run_status": "incomplete",
-                "errors_encountered": 1,
-            }))
+            root = Path(temp_dir)
+            _, _, iteration = prepare_iteration(root)
+            run_dirs = iteration_run_dirs(iteration)
+            for run_dir in run_dirs:
+                write_completed_result(run_dir)
+            write_completed_result(run_dirs[0], status="incomplete")
 
             with self.assertRaisesRegex(
                 RuntimeError,
                 "execution status is incomplete",
             ):
-                load_run_results(benchmark_dir)
+                load_run_results(iteration)
 
 
 class ViewerLayoutTests(unittest.TestCase):
     def test_documented_run_layout_exposes_prompt_and_final_response(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            eval_dir = root / "eval-descriptive-name"
-            run_dir = eval_dir / "with_skill" / "run-1"
-            outputs_dir = run_dir / "outputs"
-            outputs_dir.mkdir(parents=True)
-            (eval_dir / "eval_metadata.json").write_text(json.dumps({
-                "eval_id": 7,
-                "prompt": "Return a concise answer",
-                "expectations": [],
-            }))
-            (outputs_dir / "final.md").write_text("The final answer")
-            (outputs_dir / "metrics.json").write_text(json.dumps({
-                "run_status": "completed",
-                "errors_encountered": 0,
-            }))
+            _, _, iteration = prepare_iteration(root)
+            manifest = load_iteration_manifest(iteration)
+            eval_dir = iteration / manifest["evals"][0]["directory"]
+            run_dir = eval_dir / CONFIG_NEW / "run-1"
+            write_completed_result(run_dir)
+            (run_dir / "outputs" / "final.md").write_text(
+                "The final answer",
+                encoding="utf-8",
+            )
 
-            runs = VIEWER_MODULE.find_runs(root)
+            runs = VIEWER_MODULE.find_runs(iteration)
 
         self.assertEqual(len(runs), 1)
-        self.assertEqual(runs[0]["prompt"], "Return a concise answer")
+        self.assertEqual(runs[0]["prompt"], "Complete the example task")
         self.assertEqual(runs[0]["eval_id"], 7)
         self.assertEqual(runs[0]["outputs"][0]["name"], "final.md")
         self.assertEqual(runs[0]["outputs"][0]["content"], "The final answer")

@@ -16,6 +16,7 @@ from scripts.codex_exec import (
     reasoning_config,
     require_codex_cli,
 )
+from scripts.eval_manifest import load_run_context
 
 
 GRADER_INSTRUCTIONS = SKILL_ROOT / "agents" / "grader.md"
@@ -30,7 +31,11 @@ def require_completed_run(run_dir: Path) -> None:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             raise ValueError(f"Invalid grader input: {path}") from error
-        if data.get("run_status") != "completed" or data.get("exit_code", 0) != 0:
+        if (
+            data.get("run_status") != "completed"
+            or data.get("exit_code", 0) != 0
+            or data.get("isolation_violations")
+        ):
             raise ValueError(f"Run is not completed successfully: {path}")
 
 
@@ -74,18 +79,12 @@ def build_grader_command(
 
 def run_grader(
     run_dir: Path,
-    eval_metadata_path: Path,
-    output_path: Path | None = None,
-    model: str | None = None,
 ) -> int:
-    """Validate grading inputs, run Codex, and return its exit code."""
-    run_dir = run_dir.resolve()
-    eval_metadata_path = eval_metadata_path.resolve()
-    output_path = (
-        output_path.resolve()
-        if output_path is not None
-        else run_dir / "grading.json"
-    )
+    """Grade one prepared run using only its enclosing manifests."""
+    context = load_run_context(run_dir)
+    run_dir = context.run_dir
+    eval_metadata_path = context.eval_metadata_path
+    output_path = run_dir / "grading.json"
 
     required_paths = [
         run_dir,
@@ -110,7 +109,7 @@ def run_grader(
             run_dir,
             eval_metadata_path,
             output_path,
-            model,
+            context.model,
         ),
         text=True,
     )
@@ -121,28 +120,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Grade one completed skill evaluation run",
     )
-    parser.add_argument("--run-dir", required=True, help="Completed run directory")
     parser.add_argument(
-        "--eval-metadata",
-        required=True,
-        help="Path to the eval's eval_metadata.json",
+        "run_dir",
+        type=Path,
+        help="Completed run directory below an iteration manifest",
     )
-    parser.add_argument(
-        "--output",
-        default=None,
-        help="Output grading JSON path (default: <run-dir>/grading.json)",
-    )
-    parser.add_argument("--model", default=None, help="Optional grader model")
     args = parser.parse_args()
 
     try:
-        return run_grader(
-            Path(args.run_dir),
-            Path(args.eval_metadata),
-            Path(args.output) if args.output else None,
-            args.model,
-        )
-    except (RuntimeError, ValueError) as error:
+        return run_grader(args.run_dir)
+    except (OSError, RuntimeError, ValueError) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
 

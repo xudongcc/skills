@@ -72,12 +72,19 @@ def validate_workspace_location(
         )
 
 
-def workspace_metadata(skill_name: str, source_skill: Path) -> dict:
+def workspace_metadata(
+    skill_name: str,
+    source_skill: Path,
+    source_skill_lexical: Path | None = None,
+) -> dict:
     """Build the marker payload for a new evaluation workspace."""
     return {
         "schema_version": WORKSPACE_SCHEMA_VERSION,
         "skill_name": skill_name,
         "source_skill": str(source_skill.resolve()),
+        "source_skill_lexical": str(
+            (source_skill_lexical or source_skill).expanduser().absolute()
+        ),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -88,7 +95,8 @@ def create_eval_workspace(
     temp_parent: Path | None = None,
 ) -> Path:
     """Create, validate, and mark a persistent temporary eval workspace."""
-    source_skill = source_skill.resolve()
+    source_skill_lexical = source_skill.expanduser().absolute()
+    source_skill = source_skill_lexical.resolve()
     skill_file = source_skill / "SKILL.md"
     if not skill_file.is_file():
         raise ValueError(f"No SKILL.md found at {source_skill}")
@@ -109,7 +117,11 @@ def create_eval_workspace(
         validate_workspace_location(workspace, source_skill)
         with marker_path.open("x", encoding="utf-8") as marker_file:
             json.dump(
-                workspace_metadata(skill_name, source_skill),
+                workspace_metadata(
+                    skill_name,
+                    source_skill,
+                    source_skill_lexical,
+                ),
                 marker_file,
                 indent=2,
                 sort_keys=True,
@@ -152,6 +164,14 @@ def load_workspace_metadata(workspace: Path) -> dict:
             raise ValueError(
                 f"Evaluation workspace marker is missing {field}: {marker_path}"
             )
+    source_skill_lexical = metadata.get("source_skill_lexical")
+    if source_skill_lexical is not None and (
+        not isinstance(source_skill_lexical, str) or not source_skill_lexical
+    ):
+        raise ValueError(
+            "Evaluation workspace marker has invalid source_skill_lexical: "
+            f"{marker_path}"
+        )
     return metadata
 
 
