@@ -260,11 +260,10 @@ PROVIDER_CREDENTIAL_PATH_ENV_KEYS = {
     "SSL_CERT_FILE",
 }
 DEFAULT_MODEL_BY_ENGINE = {
-    "amp": "openai/gpt-5.6-sol",
-    "codex": "gpt-5.6-sol",
+    "amp": "openai/gpt-6.1-sol",
+    "codex": "gpt-6.1-sol",
     "claude": "claude-fable-5",
 }
-DEFAULT_CODEX_ACCESS_FALLBACK_MODEL = "gpt-5.6-terra"
 AMP_THINKING_VALUES = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
 DEFAULT_THINKING_BY_ENGINE = {
     "amp": "high",
@@ -3973,59 +3972,6 @@ def codex_speed_override(args: argparse.Namespace) -> str | None:
     return f'service_tier="{speed}"'
 
 
-def codex_error_messages(result: subprocess.CompletedProcess[str]) -> list[str]:
-    messages: list[str] = []
-    for stream, accept_plain_text in (
-        (result.stderr, True),
-        (result.stdout, False),
-    ):
-        for raw_line in stream.splitlines():
-            line = raw_line.strip()
-            if not line:
-                continue
-            if not line.startswith("{"):
-                if accept_plain_text:
-                    messages.append(line)
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(event, dict) or event.get("type") not in {
-                "error",
-                "turn.failed",
-            }:
-                continue
-            message = event.get("message")
-            if isinstance(message, str):
-                messages.append(message)
-            error = event.get("error")
-            if isinstance(error, str):
-                messages.append(error)
-            elif isinstance(error, dict) and isinstance(error.get("message"), str):
-                messages.append(error["message"])
-    return messages
-
-
-def codex_model_access_failure(result: subprocess.CompletedProcess[str], model: str) -> bool:
-    for message in codex_error_messages(result):
-        lowered = message.lower()
-        if model.lower() not in lowered:
-            continue
-        if any(
-            marker in lowered
-            for marker in (
-                "does not exist or you do not have access",
-                "do not have access to",
-                "don't have access to",
-                "does not appear in the list of models available to your account",
-                "not supported when using codex",
-            )
-        ):
-            return True
-    return False
-
-
 def codex_command(
     args: argparse.Namespace,
     source_repo: Path,
@@ -4086,11 +4032,6 @@ def run_codex(args: argparse.Namespace, repo: Path, prompt: str) -> str:
         dir=temp_root,
     ) as output_file:
         output_path = Path(output_file.name)
-    models = [args.model]
-    fallback_model = getattr(args, "fallback_model", None)
-    if fallback_model and fallback_model != args.model:
-        models.append(fallback_model)
-    primary_failure: subprocess.CompletedProcess[str] | None = None
     try:
         # The validated bundle is the sole repository input. The empty
         # workspace keeps ignored credentials and linked-worktree metadata
@@ -4106,60 +4047,39 @@ def run_codex(args: argparse.Namespace, repo: Path, prompt: str) -> str:
             runtime_root = Path(runtime_dir)
             runtime_codex_home = runtime_root / "codex-home"
             file_auth_linked = prepare_codex_runtime_auth(repo, runtime_codex_home)
-            for index, model in enumerate(models):
-                output_path.write_text("")
-                cmd = codex_command(
-                    args,
+            cmd = codex_command(
+                args,
+                repo,
+                review_root,
+                runtime_root,
+                schema_path,
+                output_path,
+                args.model,
+                force_file_auth=file_auth_linked,
+            )
+            result = run_with_heartbeat(
+                cmd,
+                review_root,
+                input_text=prompt,
+                label="codex",
+                max_runtime_seconds=getattr(args, "engine_timeout_seconds", None),
+                stream_output=args.stream_engine_output,
+                stream_display=CodexStreamDisplay() if args.stream_engine_output else None,
+                env=codex_runtime_env(
                     repo,
-                    review_root,
                     runtime_root,
-                    schema_path,
-                    output_path,
-                    model,
-                    force_file_auth=file_auth_linked,
-                )
-                result = run_with_heartbeat(
-                    cmd,
-                    review_root,
-                    input_text=prompt,
-                    label="codex",
-                    max_runtime_seconds=getattr(args, "engine_timeout_seconds", None),
-                    stream_output=args.stream_engine_output,
-                    stream_display=CodexStreamDisplay() if args.stream_engine_output else None,
-                    env=codex_runtime_env(
-                        repo,
-                        runtime_root,
-                        cmd[0],
-                        file_auth_linked=file_auth_linked,
-                    ),
-                )
-                output = output_path.read_text()
-                if result.returncode == 0:
-                    return output or result.stdout
-                if (
-                    index == 0
-                    and len(models) > 1
-                    and model
-                    and codex_model_access_failure(result, model)
-                ):
-                    primary_failure = result
-                    print(
-                        f"codex model {model} is unavailable for this account; retrying with {models[1]}",
-                        file=sys.stderr,
-                    )
-                    continue
-                detail = result.stderr or result.stdout
-                if primary_failure is not None:
-                    primary_detail = primary_failure.stderr or primary_failure.stdout
-                    raise SystemExit(
-                        f"codex engine failed with primary model ({primary_failure.returncode})\n{primary_detail}\n"
-                        f"codex fallback model failed ({result.returncode})\n{detail}"
-                    )
-                raise SystemExit(f"codex engine failed ({result.returncode})\n{detail}")
+                    cmd[0],
+                    file_auth_linked=file_auth_linked,
+                ),
+            )
+            output = output_path.read_text()
+            if result.returncode == 0:
+                return output or result.stdout
+            detail = result.stderr or result.stdout
+            raise SystemExit(f"codex engine failed ({result.returncode})\n{detail}")
     finally:
         schema_path.unlink(missing_ok=True)
         output_path.unlink(missing_ok=True)
-    raise AssertionError("unreachable")
 
 
 def run_claude(args: argparse.Namespace, repo: Path, prompt: str) -> str:
@@ -5399,7 +5319,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         action="append",
-        help="Model override or engine=model. Repeatable. Defaults: codex=gpt-5.6-sol with an access-only gpt-5.6-terra retry, claude=claude-fable-5, amp=openai/gpt-5.6-sol.",
+        help="Model override or engine=model. Repeatable. Defaults: codex=gpt-6.1-sol, claude=claude-fable-5, amp=openai/gpt-6.1-sol.",
     )
     parser.add_argument("--thinking", action="append", help="Thinking/effort override or engine=level. Repeatable. Codex: none, minimal, low, medium, high, xhigh, max. Claude: low, medium, high, xhigh, max. Amp: none, low, medium, high, xhigh, max. Pi: off, minimal, low, medium, high, xhigh. Kimi: off, on.")
     parser.add_argument(
@@ -5563,8 +5483,6 @@ def reviewer_args(args: argparse.Namespace) -> list[argparse.Namespace]:
             or env_fallback_by_engine.get(engine)
             or env_global_fallback
         )
-    elif engine == "codex" and model == DEFAULT_MODEL_BY_ENGINE["codex"]:
-        fallback_model = DEFAULT_CODEX_ACCESS_FALLBACK_MODEL
     else:
         fallback_model = None
     if thinking and thinking not in THINKING_LEVELS_BY_ENGINE[engine]:
