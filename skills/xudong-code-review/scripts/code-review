@@ -43,7 +43,7 @@ SAFE_GIT_CONFIG_ARGS = (
     "pager.show=cat",
 )
 SAFE_DIFF_FLAGS = ("--no-ext-diff", "--no-textconv", "--no-renames")
-DIFF_HUNK_CONTENT_BOUNDARY = "\0xudong-code-review-diff-hunk-boundary\0"
+DIFF_HUNK_CONTENT_BOUNDARY = "\0code-review-diff-hunk-boundary\0"
 ENGINE_GIT_CONFIG_OVERRIDES = (
     ("core.fsmonitor", "false"),
     ("core.pager", "cat"),
@@ -355,10 +355,6 @@ def external_env_path(repo: Path, value: str) -> bool:
     return not is_within(resolved, repo.resolve())
 
 
-def external_env_path_value(repo: Path, key: str, value: str) -> bool:
-    return normalize_external_env_path_value(repo, key, value) is not None
-
-
 def normalize_external_env_path_value(
     repo: Path,
     key: str,
@@ -465,14 +461,12 @@ def safe_engine_env(
         "OPENAI_PROJECT",
     }
     engine_allowed_exact = codex_allowed_exact if engine == "codex" else set()
-    allowed_prefixes = ("XUDONG_CODE_REVIEW_FAKE_",)
     env = {
         key: value
         for key, value in os.environ.items()
         if (
             key in common_allowed_exact
             or key in engine_allowed_exact
-            or any(key.startswith(prefix) for prefix in allowed_prefixes)
         )
     }
     for key in (
@@ -487,7 +481,7 @@ def safe_engine_env(
         if value and not safe_proxy_url(value):
             raise SystemExit(
                 f"unsafe credentialed or malformed proxy URL in {key}; "
-                "configure a credential-free proxy URL before running xudong-code-review"
+                "configure a credential-free proxy URL before running code-review"
             )
     env["PATH"] = safe_engine_path(repo, extra_paths)
     for key in ("HOME", "USERPROFILE"):
@@ -546,7 +540,7 @@ def process_group_popen_kwargs() -> dict[str, Any]:
 
     This lets us terminate the whole group instead of just the immediate
     child, so wrapper scripts and any processes they spawn do not outlive
-    the parent xudong-code-review invocation.
+    the parent code-review invocation.
     """
     if os.name == "nt":
         return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
@@ -1073,7 +1067,7 @@ def repo_root() -> Path:
     except UnicodeDecodeError as exc:
         raise SystemExit("repository root is not valid UTF-8") from exc
     if result.returncode != 0:
-        raise SystemExit("xudong-code-review must run inside a git repository")
+        raise SystemExit("code-review must run inside a git repository")
     return Path(result.stdout.strip()).resolve()
 
 
@@ -1213,35 +1207,6 @@ TRUFFLEHOG_INSTALL_URL = "https://github.com/trufflesecurity/trufflehog#installa
 TRUFFLEHOG_FINDINGS_EXIT_CODE = 183
 
 
-def git_bytes(
-    repo: Path,
-    *args: str,
-    check: bool = True,
-) -> subprocess.CompletedProcess[bytes]:
-    result = subprocess.run(
-        [
-            resolve_command("git", repo),
-            "--no-optional-locks",
-            *SAFE_GIT_CONFIG_ARGS,
-            *args,
-        ],
-        cwd=repo,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=safe_git_env(repo),
-    )
-    if check and result.returncode != 0:
-        detail = (result.stderr or result.stdout).decode(
-            SUBPROCESS_TEXT_ENCODING,
-            errors=SUBPROCESS_TEXT_ERRORS,
-        )
-        raise SystemExit(
-            f"Git failed while preparing the TruffleHog scan ({result.returncode}): "
-            f"{display_escape(detail, 1000, multiline=True)}"
-        )
-    return result
-
-
 def safe_trufflehog_env(repo: Path) -> dict[str, str]:
     env = safe_git_env(repo)
     for key in (
@@ -1260,7 +1225,7 @@ def safe_trufflehog_env(repo: Path) -> dict[str, str]:
         if key.casefold() != "no_proxy" and not safe_proxy_url(value):
             raise SystemExit(
                 f"unsafe credentialed or malformed proxy URL in {key}; "
-                "configure a credential-free proxy URL before running xudong-code-review"
+                "configure a credential-free proxy URL before running code-review"
             )
         env[key] = value
     return env
@@ -1329,10 +1294,10 @@ def scan_outgoing_review_pack(repo: Path, prompt: str) -> None:
     if not trufflehog_bin:
         raise SystemExit(
             "refusing to send review pack: TruffleHog is required but was not found. "
-            f"Install it using the official instructions, then rerun xudong-code-review: {TRUFFLEHOG_INSTALL_URL}"
+            f"Install it using the official instructions, then rerun code-review: {TRUFFLEHOG_INSTALL_URL}"
         )
     with tempfile.TemporaryDirectory(
-        prefix="xudong-code-review-pack-scan.",
+        prefix="code-review-pack-scan.",
         dir=safe_temp_root(repo),
     ) as tempdir:
         pack_path = Path(tempdir) / "review-pack.txt"
@@ -1363,12 +1328,6 @@ def scan_outgoing_review_pack(repo: Path, prompt: str) -> None:
         raise SystemExit(
             "refusing to send review pack: TruffleHog could not complete the scan"
         )
-
-
-def bounded(text: str, limit: int = 180_000) -> str:
-    if len(text) <= limit:
-        return text
-    return text[:limit] + f"\n\n[truncated at {limit} characters]\n"
 
 
 def ensure_reviewer_input_complete(reviewer: argparse.Namespace, input_truncated: bool) -> None:
@@ -1462,29 +1421,6 @@ def read_prefix(path: Path, limit: int) -> tuple[bytes, bool]:
         if descriptor is not None:
             os.close(descriptor)
     return data[:limit], len(data) > limit
-
-
-def read_text_with_status(path: Path, limit: int = MAX_BUNDLE_TEXT_BYTES) -> tuple[str, bool]:
-    try:
-        data, truncated = read_prefix(path, limit)
-    except SystemExit as exc:
-        return f"[unreadable: {exc}]", True
-    if b"\0" in data:
-        return "[binary file omitted]", True
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        return "[non-UTF-8 file omitted]", True
-    if len(text) > limit:
-        text = text[:limit]
-        truncated = True
-    if truncated:
-        return text + f"\n\n[truncated at {limit} characters]\n", True
-    return text, False
-
-
-def read_text(path: Path, limit: int = MAX_BUNDLE_TEXT_BYTES) -> str:
-    return read_text_with_status(path, limit)[0]
 
 
 def path_has_sensitive_part(rel: str | Path) -> bool:
@@ -1801,21 +1737,6 @@ def require_no_gitlink_diff(label: str, raw_diff: str) -> None:
             f"refusing gitlink/submodule changes in {label} because the referenced "
             f"dependency contents are not present in the review bundle:\n{details}{more}"
         )
-
-
-def file_bundle_risk(
-    repo: Path,
-    path: Path,
-    rel: str,
-    *,
-    allow_binary_omission: bool = False,
-) -> str | None:
-    return file_bundle_snapshot(
-        repo,
-        path,
-        rel,
-        allow_binary_omission=allow_binary_omission,
-    )[2]
 
 
 def file_bundle_snapshot(
@@ -2800,7 +2721,7 @@ def render_review_prompt(
         {json.dumps(SCHEMA, indent=2)}
         - Do not modify files.
         - Do not invoke nested reviewers or review tools.
-        - Forbidden nested review commands include: codex review, xudong-code-review, claude review, oracle review.
+        - Forbidden nested review commands include: codex review, code-review, claude review, oracle review.
         - The review sandbox is intentionally empty. The change bundle and explicit prompt or datasets are the only reviewed-repository source. Read-only tools cannot access unchanged repository files.
         - You may use read-only tools and web search to inspect external dependency contracts, upstream docs, current public behavior, and security implications.
         - Do not report a missing import, symbol, definition, call site, config entry, or other unchanged context solely because it is absent from the change bundle. Such a finding requires direct proof in the bundle or explicit datasets.
@@ -2984,9 +2905,9 @@ def codex_config_isolation_flags(repo: Path, runtime_root: Path) -> list[str]:
         "-c",
         "allow_login_shell=false",
         "-c",
-        'default_permissions="xudong-code-review"',
+        'default_permissions="code-review"',
         "-c",
-        'permissions.xudong-code-review.filesystem={":minimal"="read",":workspace_roots"="read"}',
+        'permissions.code-review.filesystem={":minimal"="read",":workspace_roots"="read"}',
     ]
 
 
@@ -3199,10 +3120,10 @@ def ensure_codex_isolation_supported(
     codex_bin = resolve_command(selected_bin, repo)
     temp_root = safe_temp_root(repo)
     with tempfile.TemporaryDirectory(
-        prefix="xudong-code-review-codex-probe-workspace.",
+        prefix="code-review-codex-probe-workspace.",
         dir=temp_root,
     ) as workspace_dir, tempfile.TemporaryDirectory(
-        prefix="xudong-code-review-codex-probe-runtime.",
+        prefix="code-review-codex-probe-runtime.",
         dir=temp_root,
     ) as runtime_dir:
         probe_env = codex_runtime_env(
@@ -3229,7 +3150,7 @@ def ensure_codex_isolation_supported(
             f"{selected_bin!r} resolved to {codex_bin!r}, but --version exited "
             f"{result.returncode} under the isolated runtime.{suffix}\n"
             "Use an absolute --codex-bin path or correct PATH. "
-            "CODEX_HOME-dependent launchers are incompatible with xudong-code-review isolation."
+            "CODEX_HOME-dependent launchers are incompatible with code-review isolation."
         )
     return codex_bin
 
@@ -3353,10 +3274,10 @@ def run_codex(args: argparse.Namespace, repo: Path, prompt: str) -> str:
         # workspace keeps ignored credentials and linked-worktree metadata
         # outside the model's readable filesystem boundary.
         with tempfile.TemporaryDirectory(
-            prefix="xudong-code-review-codex-workspace.",
+            prefix="code-review-codex-workspace.",
             dir=temp_root,
         ) as workspace_dir, tempfile.TemporaryDirectory(
-            prefix="xudong-code-review-codex-runtime.",
+            prefix="code-review-codex-runtime.",
             dir=temp_root,
         ) as runtime_dir:
             review_root = Path(workspace_dir)
@@ -3549,7 +3470,7 @@ def _validate_report(
         for index, finding, rel, line in ignored_findings:
             title = finding.get("title", "<untitled>")
             print(
-                "xudong-code-review ignored out-of-scope finding "
+                "code-review ignored out-of-scope finding "
                 f"{index}: {display_escape(title, 140)} "
                 f"({display_escape(rel, 500)}:{line})",
                 file=sys.stderr,
@@ -3622,7 +3543,7 @@ def number_in_range(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1
 
 
-def print_report(report: dict[str, Any], *, label: str = "xudong-code-review") -> None:
+def print_report(report: dict[str, Any], *, label: str = "code-review") -> None:
     findings = report["findings"]
     display_label = display_escape(label, 200)
     if findings:
@@ -3661,7 +3582,7 @@ def positive_float(value: str) -> float:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="xudong-code-review", description="Bundle-driven Codex code review.", allow_abbrev=False)
+    parser = argparse.ArgumentParser(prog="code-review", description="Bundle-driven Codex code review.", allow_abbrev=False)
     parser.add_argument("--mode", choices=["auto", "local", "uncommitted", "branch", "commit"], default="auto")
     parser.add_argument("--base")
     parser.add_argument("--commit", default="HEAD")
@@ -4028,7 +3949,7 @@ def main_impl() -> int:
     repo = repo_root()
     reject_repo_output_paths(args, repo)
     target, target_ref = choose_target(repo, args.mode, args.base)
-    print(f"xudong-code-review target: {target}")
+    print(f"code-review target: {target}")
     print(f"branch: {current_branch(repo)}")
     reviewer = reviewers[0]
     print(f"engine: {reviewer.engine}")
@@ -4079,7 +4000,7 @@ def main_impl() -> int:
     if source_tree_snapshot(repo) != review_source_snapshot:
         raise SystemExit(
             "source changed while the review bundle was being created; "
-            "rerun xudong-code-review against the updated tree"
+            "rerun code-review against the updated tree"
         )
     chunk_reports = run_review_passes(
         args,
@@ -4094,14 +4015,14 @@ def main_impl() -> int:
     else:
         report = merge_chunk_reports(chunk_reports)
         validate_report(report, repo, changed_paths, args.require_finding)
-    label = "xudong-code-review"
+    label = "code-review"
     if len(chunk_reports) > 1:
         label += " chunked"
 
     if source_tree_snapshot(repo) != review_source_snapshot:
         print(
             "source changed after the review bundle was created; "
-            "rerun xudong-code-review against the updated tree",
+            "rerun code-review against the updated tree",
             file=sys.stderr,
         )
         return 1

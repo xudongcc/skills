@@ -52,10 +52,10 @@ For a project-local installation, replace that prefix with
 
 ```bash
 # Global installation:
-"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --help
+"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --help
 
 # Project-local installation:
-.agents/skills/xudong-code-review/scripts/xudong-code-review --help
+.agents/skills/xudong-code-review/scripts/code-review --help
 ```
 
 On native Windows, run the extensionless helper with Python and use the
@@ -66,7 +66,7 @@ On native Windows, run the extensionless helper with Python and use the
 Dirty local work:
 
 ```bash
-"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --mode local
+"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --mode local
 ```
 
 Use this only when the patch is actually unstaged/staged/untracked in the
@@ -79,26 +79,26 @@ only proves there is no local patch.
 Branch/PR work:
 
 ```bash
-"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --mode branch --base origin/main
+"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --mode branch --base origin/main
 ```
 
 Optional review context is first-class. Prompt files and datasets must be repo-relative so review bundles cannot pull arbitrary host files:
 
 ```bash
-"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --mode branch --base origin/main --prompt-file review-notes.md --dataset evidence.json
+"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --mode branch --base origin/main --prompt-file review-notes.md --dataset evidence.json
 ```
 
 If an open PR exists, use its actual base:
 
 ```bash
 base=$(gh pr view --json baseRefName --jq .baseRefName)
-"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --mode branch --base "origin/$base"
+"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --mode branch --base "origin/$base"
 ```
 
 Committed single change:
 
 ```bash
-"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --mode commit --commit HEAD
+"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --mode commit --commit HEAD
 ```
 
 Use commit review for already-landed or already-pushed work on `main`. Reviewing
@@ -140,9 +140,9 @@ Accepted reasoning levels: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, 
 The helper passes the level through `model_reasoning_effort`.
 
 ```bash
-"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --model gpt-6.1-sol --thinking high
-"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --codex-speed fast
-"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --codex-config 'model_verbosity="low"'
+"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --model gpt-6.1-sol --thinking high
+"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --codex-speed fast
+"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --codex-config 'model_verbosity="low"'
 ```
 
 `--codex-speed` accepts `fast`, `flex`, and `default`; the selected model must
@@ -189,7 +189,7 @@ Run the helper directly so target selection, engine choice, structured validatio
 Show the helper options:
 
 ```bash
-"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --help
+"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --help
 ```
 
 The smoke harness has thin shell wrappers over a shared Python implementation:
@@ -201,7 +201,7 @@ The smoke harness has thin shell wrappers over a shared Python implementation:
 On native Windows, invoke the extensionless Python helper through Python:
 
 ```powershell
-python "$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --help
+python "$HOME/.agents/skills/xudong-code-review/scripts/code-review" --help
 ```
 
 and the smoke harness:
@@ -228,7 +228,7 @@ The helper:
 - uses `gpt-6.1-sol` with `high` reasoning and no model fallback; explicit `--model` and `--thinking` values override the built-in defaults
 - gives Codex the validated bundle in an empty workspace with web search available
 - prints `review still running: <engine> elapsed=<seconds>s pid=<pid>` to stderr at long-running intervals while waiting for the selected review engine, unless streamed output or compact Codex activity has been visible recently
-- prints `xudong-code-review clean: no accepted/actionable findings reported` when the selected review command exits 0
+- prints `code-review clean: no accepted/actionable findings reported` when the selected review command exits 0
 - exits nonzero when accepted/actionable findings are present
 
 ## Final Report

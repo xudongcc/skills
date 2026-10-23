@@ -114,7 +114,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         description=(
             "Creates a temporary git repo with either a deliberately unsafe patch "
             "or a security-sensitive-but-safe patch, then verifies the Codex "
-            "engine through xudong-code-review."
+            "engine through code-review."
         ),
     )
     parser.add_argument("--fixture", choices=("malicious", "benign"), default="malicious")
@@ -141,8 +141,8 @@ def create_fixture_repo(repo: Path, fixture: str) -> None:
     write_fixture_file(repo, MALICIOUS_CHANGED if fixture == "malicious" else BENIGN_CHANGED)
 
 
-def validate_prompt_policy(repo: Path, xudong_code_review: Path) -> None:
-    namespace = runpy.run_path(str(xudong_code_review))
+def validate_prompt_policy(repo: Path, code_review: Path) -> None:
+    namespace = runpy.run_path(str(code_review))
     prompt = namespace["build_prompt"](repo, "local", None, "fixture diff", "", "")
     required = (
         "This helper is a closeout gate.",
@@ -152,16 +152,16 @@ def validate_prompt_policy(repo: Path, xudong_code_review: Path) -> None:
     )
     missing = [needle for needle in required if needle not in prompt]
     if missing:
-        raise RuntimeError(f"xudong-code-review prompt missing scope policy: {missing}")
+        raise RuntimeError(f"code-review prompt missing scope policy: {missing}")
 
 
 def run_reviews(repo: Path, script_dir: Path, fixture: str) -> None:
-    xudong_code_review = script_dir / "xudong-code-review"
-    validate_prompt_policy(repo, xudong_code_review)
+    code_review = script_dir / "code-review"
+    validate_prompt_policy(repo, code_review)
     print("== codex ==", flush=True)
     command = [
         sys.executable,
-        str(xudong_code_review),
+        str(code_review),
         "--mode",
         "local",
         "--prompt",
@@ -199,7 +199,7 @@ def cleanup_repo(repo: Path) -> None:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     script_dir = Path(__file__).resolve().parent
-    repo = Path(tempfile.mkdtemp(prefix="xudong-code-review-fixture."))
+    repo = Path(tempfile.mkdtemp(prefix="code-review-fixture."))
     try:
         create_fixture_repo(repo, args.fixture)
         run_reviews(repo, script_dir, args.fixture)

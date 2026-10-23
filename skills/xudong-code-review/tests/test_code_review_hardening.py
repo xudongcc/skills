@@ -18,7 +18,7 @@ from unittest import mock
 from pathlib import Path, PureWindowsPath
 
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "xudong-code-review"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "code-review"
 FIXTURES = Path(__file__).with_name("fixtures")
 PRIVATE_KEY_BEGIN_TEXT = "BEGIN " + "PRIVATE KEY"
 RSA_PRIVATE_KEY_BEGIN_TEXT = "BEGIN RSA " + "PRIVATE KEY"
@@ -34,15 +34,15 @@ def write_executable(path: Path, text: str) -> Path:
     return wrapper
 
 
-def fake_codex_script() -> str:
-    return r'''#!/usr/bin/env python3
+def fake_codex_script(*, record: Path | None = None, invocations: Path | None = None, mutation: Path | None = None) -> str:
+    script = r'''#!/usr/bin/env python3
 import json
 import os
 from pathlib import Path
 import sys
 
 args = sys.argv[1:]
-if invocations := os.environ.get("XUDONG_CODE_REVIEW_FAKE_CODEX_INVOCATIONS"):
+if invocations := __INVOCATIONS_PATH__:
     selected_env = {
         key: os.environ.get(key)
         for key in (
@@ -61,9 +61,9 @@ if invocations := os.environ.get("XUDONG_CODE_REVIEW_FAKE_CODEX_INVOCATIONS"):
 if "--version" in args or "-v" in args:
     print("codex-cli 0.0.0-test")
     raise SystemExit(0)
-record = os.environ["XUDONG_CODE_REVIEW_FAKE_RECORD"]
-Path(record).write_text(json.dumps({"argv": args, "cwd": os.getcwd(), "stdin": sys.stdin.read()}))
-if mutation := os.environ.get("XUDONG_CODE_REVIEW_FAKE_MUTATE"):
+if record := __RECORD_PATH__:
+    Path(record).write_text(json.dumps({"argv": args, "cwd": os.getcwd(), "stdin": sys.stdin.read()}))
+if mutation := __MUTATION_PATH__:
     Path(mutation).write_text("mutated during review\n")
 try:
     output_path = args[args.index("--output-last-message") + 1]
@@ -78,20 +78,23 @@ report = {
 Path(output_path).write_text(json.dumps(report))
 print("fake codex ok")
 '''
+    for name, path in (("RECORD", record), ("INVOCATIONS", invocations), ("MUTATION", mutation)):
+        script = script.replace(f"__{name}_PATH__", repr(str(path)) if path is not None else "None")
+    return script
 
 
 def load_helper() -> dict[str, object]:
-    return runpy.run_path(str(SCRIPT), run_name="xudong-code-review_under_test")
+    return runpy.run_path(str(SCRIPT), run_name="code-review_under_test")
 
 
 def git(repo: Path, *args: str) -> str:
     env = os.environ.copy()
     env.update(
         {
-            "GIT_AUTHOR_NAME": "XudongCodeReview Test",
-            "GIT_AUTHOR_EMAIL": "xudong-code-review@example.invalid",
-            "GIT_COMMITTER_NAME": "XudongCodeReview Test",
-            "GIT_COMMITTER_EMAIL": "xudong-code-review@example.invalid",
+            "GIT_AUTHOR_NAME": "CodeReview Test",
+            "GIT_AUTHOR_EMAIL": "code-review@example.invalid",
+            "GIT_COMMITTER_NAME": "CodeReview Test",
+            "GIT_COMMITTER_EMAIL": "code-review@example.invalid",
         }
     )
     result = subprocess.run(
@@ -110,8 +113,8 @@ def init_repo(tempdir: Path) -> Path:
     repo = tempdir / "repo"
     repo.mkdir()
     git(repo, "init", "-q")
-    git(repo, "config", "user.name", "XudongCodeReview Test")
-    git(repo, "config", "user.email", "xudong-code-review@example.invalid")
+    git(repo, "config", "user.name", "CodeReview Test")
+    git(repo, "config", "user.email", "code-review@example.invalid")
     return repo
 
 
@@ -158,7 +161,7 @@ def path_excluding_command(name: str) -> str:
     return os.pathsep.join(kept)
 
 
-class XudongCodeReviewHardeningTests(unittest.TestCase):
+class CodeReviewHardeningTests(unittest.TestCase):
     def setUp(self) -> None:
         self.helper = load_helper()
 
@@ -1613,26 +1616,6 @@ class XudongCodeReviewHardeningTests(unittest.TestCase):
                     "",
                 )
 
-    def test_read_text_truncates_without_scanning_tail(self) -> None:
-        with tempfile.TemporaryDirectory() as tempdir:
-            path = Path(tempdir) / "large.txt"
-            path.write_bytes(b"x" * 200_000 + b"\0tail")
-
-            text = self.helper["read_text"](path)
-
-            self.assertIn("[truncated at 180000 characters]", text)
-            self.assertNotEqual(text, "[binary file omitted]")
-
-    def test_read_text_marks_unreadable_input_incomplete(self) -> None:
-        with mock.patch.dict(
-            self.helper["read_text_with_status"].__globals__,
-            {"read_prefix": lambda *_args: (_ for _ in ()).throw(SystemExit("denied"))},
-        ):
-            text, incomplete = self.helper["read_text_with_status"](Path("blocked"))
-
-        self.assertIn("[unreadable:", text)
-        self.assertTrue(incomplete)
-
     def test_evidence_file_must_be_repo_relative_and_not_symlinked(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
@@ -1901,17 +1884,18 @@ class XudongCodeReviewHardeningTests(unittest.TestCase):
         proc_b.wait.assert_called_once_with(timeout=0.5)
 
     def test_engine_interrupted_is_not_swallowed_by_except_system_exit(self) -> None:
-        # Regression: EngineInterrupted used to subclass SystemExit, so
-        # internal `except SystemExit` guards like read_text_with_status's
-        # converted an in-flight interrupt into an unreadable-file result
-        # and kept going instead of unwinding.
-        with mock.patch.dict(
-            self.helper["read_text_with_status"].__globals__,
-            {"read_prefix": mock.Mock(side_effect=self.helper["EngineInterrupted"](130))},
-        ):
-            with self.assertRaises(self.helper["EngineInterrupted"]) as ctx:
-                self.helper["read_text_with_status"](Path("irrelevant"))
-        self.assertEqual(ctx.exception.code, 130)
+        # An interrupt must escape file-read error handling and stop the review.
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            source = repo / "source.txt"
+            source.write_text("review me\n", encoding="utf-8")
+            with mock.patch.dict(
+                self.helper["file_bundle_snapshot"].__globals__,
+                {"read_prefix": mock.Mock(side_effect=self.helper["EngineInterrupted"](130))},
+            ):
+                with self.assertRaises(self.helper["EngineInterrupted"]) as ctx:
+                    self.helper["file_bundle_snapshot"](repo, source, "source.txt")
+            self.assertEqual(ctx.exception.code, 130)
 
     def test_main_converts_engine_interrupted_to_exit_code(self) -> None:
         with mock.patch.dict(
@@ -2071,17 +2055,15 @@ class XudongCodeReviewHardeningTests(unittest.TestCase):
             git(repo, "add", "source.txt")
             git(repo, "commit", "-qm", "initial")
             source.write_text("review me\n", encoding="utf-8")
+            record_path = root / "record.json"
             codex_bin = write_executable(
                 root / "codex",
-                fake_codex_script(),
+                fake_codex_script(record=record_path, mutation=source),
             )
-            record_path = root / "record.json"
             env = os.environ.copy()
             add_fake_trufflehog(self.helper, root, env)
             env.update(
                 {
-                    "XUDONG_CODE_REVIEW_FAKE_MUTATE": str(source),
-                    "XUDONG_CODE_REVIEW_FAKE_RECORD": str(record_path),
                     "HOME": str(root),
                     "USERPROFILE": str(root),
                 }
@@ -2544,8 +2526,8 @@ class XudongCodeReviewHardeningTests(unittest.TestCase):
             "shell_environment_policy.ignore_default_excludes=false",
             "shell_environment_policy.experimental_use_profile=false",
             "allow_login_shell=false",
-            'default_permissions="xudong-code-review"',
-            'permissions.xudong-code-review.filesystem={":minimal"="read",":workspace_roots"="read"}',
+            'default_permissions="code-review"',
+            'permissions.code-review.filesystem={":minimal"="read",":workspace_roots"="read"}',
         ):
             self.assertIn(required, flags)
         set_flag = next(
@@ -3112,7 +3094,7 @@ os.execv(target, [str(target), *sys.argv[1:]])
             self.assertIn("correct PATH", result.stdout)
 
             invocations = root / "codex-invocations.jsonl"
-            env["XUDONG_CODE_REVIEW_FAKE_CODEX_INVOCATIONS"] = str(invocations)
+            write_executable(direct_bin, fake_codex_script(invocations=invocations))
             normal_run = subprocess.run(
                 [
                     sys.executable,
@@ -3148,7 +3130,7 @@ os.execv(target, [str(target), *sys.argv[1:]])
             (root / "direct-bin").mkdir()
             direct_bin = write_executable(
                 root / "direct-bin" / "codex",
-                fake_codex_script(),
+                fake_codex_script(record=root / "codex-record.json", invocations=root / "codex-invocations.jsonl"),
             )
             source_home = root / "source-codex-home"
             source_home.mkdir()
@@ -3162,13 +3144,10 @@ os.execv(target, [str(target), *sys.argv[1:]])
                 encoding="utf-8",
             )
             invocations = root / "codex-invocations.jsonl"
-            record = root / "codex-record.json"
             env = os.environ.copy()
             add_fake_trufflehog(self.helper, root, env)
             env.update(
                 {
-                    "XUDONG_CODE_REVIEW_FAKE_CODEX_INVOCATIONS": str(invocations),
-                    "XUDONG_CODE_REVIEW_FAKE_RECORD": str(record),
                     "CODEX_HOME": str(source_home),
                 }
             )

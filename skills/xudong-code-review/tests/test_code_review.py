@@ -17,12 +17,12 @@ from pathlib import Path
 from unittest import mock
 
 
-SCRIPT_PATH = Path(__file__).with_name("xudong-code-review")
-LOADER = SourceFileLoader("xudong_code_review_module", str(SCRIPT_PATH))
+SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "code-review"
+LOADER = SourceFileLoader("code_review_module", str(SCRIPT_PATH))
 SPEC = importlib.util.spec_from_loader(LOADER.name, LOADER)
 assert SPEC is not None
-XUDONG_CODE_REVIEW = importlib.util.module_from_spec(SPEC)
-LOADER.exec_module(XUDONG_CODE_REVIEW)
+CODE_REVIEW = importlib.util.module_from_spec(SPEC)
+LOADER.exec_module(CODE_REVIEW)
 
 
 FINAL_REPORT = {
@@ -49,7 +49,7 @@ DRAFT_REPORT = {
 }
 
 
-class XudongCodeReviewInterfaceTests(unittest.TestCase):
+class CodeReviewInterfaceTests(unittest.TestCase):
     def test_removed_engine_and_fallback_options_are_rejected(self) -> None:
         options = [
             ["--engine", "codex"],
@@ -58,10 +58,10 @@ class XudongCodeReviewInterfaceTests(unittest.TestCase):
         ]
         for option in options:
             with self.subTest(option=option), mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(
-                sys, "argv", ["xudong-code-review", *option],
+                sys, "argv", ["code-review", *option],
             ), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as error:
-                    XUDONG_CODE_REVIEW.parse_args()
+                    CODE_REVIEW.parse_args()
                 self.assertEqual(error.exception.code, 2)
 
     def test_removed_configuration_environment_is_ignored(self) -> None:
@@ -86,36 +86,36 @@ class XudongCodeReviewInterfaceTests(unittest.TestCase):
               ['model_verbosity="low"'], 'service_tier="fast"')),
         ):
             with self.subTest(flags=flags), mock.patch.dict(os.environ, environment, clear=True), mock.patch.object(
-                sys, "argv", ["xudong-code-review", *flags],
+                sys, "argv", ["code-review", *flags],
             ):
-                reviewer = XUDONG_CODE_REVIEW.reviewer_args(XUDONG_CODE_REVIEW.parse_args())[0]
+                reviewer = CODE_REVIEW.reviewer_args(CODE_REVIEW.parse_args())[0]
                 self.assertEqual(reviewer.engine, "codex")
                 self.assertEqual((
                     reviewer.model, reviewer.thinking, reviewer.max_priority,
                     reviewer.engine_timeout_seconds, reviewer.stream_engine_output,
-                    reviewer.codex_bin, XUDONG_CODE_REVIEW.codex_config_overrides(reviewer),
-                    XUDONG_CODE_REVIEW.codex_speed_override(reviewer),
+                    reviewer.codex_bin, CODE_REVIEW.codex_config_overrides(reviewer),
+                    CODE_REVIEW.codex_speed_override(reviewer),
                 ), expected)
 
     def test_extract_json_accepts_codex_final_report(self) -> None:
-        self.assertEqual(XUDONG_CODE_REVIEW.extract_json(json.dumps(FINAL_REPORT)), FINAL_REPORT)
+        self.assertEqual(CODE_REVIEW.extract_json(json.dumps(FINAL_REPORT)), FINAL_REPORT)
 
     def test_extract_json_rejects_wrapped_or_malformed_reports(self) -> None:
         for output in ("", "not JSON", "```json\n{}\n```", "[]", "{}", json.dumps({"result": FINAL_REPORT})):
             with self.subTest(output=output), self.assertRaises(SystemExit):
-                XUDONG_CODE_REVIEW.extract_json(output)
+                CODE_REVIEW.extract_json(output)
 
 
-class XudongCodeReviewPriorityTests(unittest.TestCase):
+class CodeReviewPriorityTests(unittest.TestCase):
     def test_priority_filter_omits_lower_findings_and_cleans_verdict(self) -> None:
         report = copy.deepcopy(DRAFT_REPORT)
-        XUDONG_CODE_REVIEW.filter_findings_by_priority(report, "P0")
+        CODE_REVIEW.filter_findings_by_priority(report, "P0")
         self.assertEqual(report["findings"], [])
         self.assertEqual(report["overall_correctness"], "patch is correct")
         self.assertIn("below the requested P0", report["overall_explanation"])
 
 
-class XudongCodeReviewTruffleHogTests(unittest.TestCase):
+class CodeReviewTruffleHogTests(unittest.TestCase):
     def test_findings_map_to_prompt_dataset_untracked_and_diff_paths(self) -> None:
         prompt = "\n".join(
             (
@@ -145,7 +145,7 @@ class XudongCodeReviewTruffleHogTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            XUDONG_CODE_REVIEW.trufflehog_review_pack_paths(prompt, output),
+            CODE_REVIEW.trufflehog_review_pack_paths(prompt, output),
             ["evidence.json", "new.ts", "new/config.ts", "review-notes.md"],
         )
 
@@ -170,7 +170,7 @@ class XudongCodeReviewTruffleHogTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            XUDONG_CODE_REVIEW.trufflehog_review_pack_paths(prompt, output),
+            CODE_REVIEW.trufflehog_review_pack_paths(prompt, output),
             ["config.ts"],
         )
 
@@ -185,7 +185,7 @@ class XudongCodeReviewTruffleHogTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            XUDONG_CODE_REVIEW.trufflehog_review_pack_paths("prompt", output),
+            CODE_REVIEW.trufflehog_review_pack_paths("prompt", output),
             ["review pack"],
         )
 
@@ -215,17 +215,17 @@ class XudongCodeReviewTruffleHogTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, "", "")
 
             with mock.patch.object(
-                XUDONG_CODE_REVIEW,
+                CODE_REVIEW,
                 "find_command",
                 return_value="/trusted/trufflehog",
-            ), mock.patch.object(XUDONG_CODE_REVIEW, "run", side_effect=run_scanner):
-                XUDONG_CODE_REVIEW.scan_outgoing_review_pack(repo, prompt)
+            ), mock.patch.object(CODE_REVIEW, "run", side_effect=run_scanner):
+                CODE_REVIEW.scan_outgoing_review_pack(repo, prompt)
 
 
-class XudongCodeReviewCompatibilityTests(unittest.TestCase):
+class CodeReviewCompatibilityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.home_dir = tempfile.TemporaryDirectory(prefix="xudong-code-review-test-home.")
+        cls.home_dir = tempfile.TemporaryDirectory(prefix="code-review-test-home.")
         cls.home_patch = mock.patch.object(Path, "home", return_value=Path(cls.home_dir.name))
         cls.home_patch.start()
         cls.home_keys = ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH")
@@ -248,7 +248,7 @@ class XudongCodeReviewCompatibilityTests(unittest.TestCase):
 
     def test_codex_config_status_exposes_keys_only(self) -> None:
         args = argparse.Namespace(codex_config=['model_verbosity="low"'])
-        self.assertEqual(XUDONG_CODE_REVIEW.codex_config_keys(args), ["model_verbosity"])
+        self.assertEqual(CODE_REVIEW.codex_config_keys(args), ["model_verbosity"])
 
     def test_codex_surfaces_provider_failures_without_model_fallback(self) -> None:
         for message in (
@@ -279,25 +279,25 @@ class XudongCodeReviewCompatibilityTests(unittest.TestCase):
                         message,
                     )
 
-                with tempfile.TemporaryDirectory(prefix="xudong-code-review-codex-fallback.") as tmpdir, mock.patch.object(
-                    XUDONG_CODE_REVIEW,
+                with tempfile.TemporaryDirectory(prefix="code-review-codex-fallback.") as tmpdir, mock.patch.object(
+                    CODE_REVIEW,
                     "resolve_command",
                     return_value="/usr/bin/codex",
                 ), mock.patch.object(
-                    XUDONG_CODE_REVIEW,
+                    CODE_REVIEW,
                     "ensure_codex_isolation_supported",
                     return_value="/usr/bin/codex",
-                ), mock.patch.object(XUDONG_CODE_REVIEW, "codex_auth_config_flags", return_value=[]), mock.patch.object(
-                    XUDONG_CODE_REVIEW,
+                ), mock.patch.object(CODE_REVIEW, "codex_auth_config_flags", return_value=[]), mock.patch.object(
+                    CODE_REVIEW,
                     "prepare_codex_runtime_auth",
                     return_value=None,
                 ), mock.patch.object(
-                    XUDONG_CODE_REVIEW,
+                    CODE_REVIEW,
                     "run_with_heartbeat",
                     side_effect=fake_run,
                 ):
                     with self.assertRaises(SystemExit) as error:
-                        XUDONG_CODE_REVIEW.run_codex(args, Path(tmpdir), "review")
+                        CODE_REVIEW.run_codex(args, Path(tmpdir), "review")
 
                 self.assertIn(message, str(error.exception))
                 self.assertEqual(models, ["gpt-6.1-sol"])
@@ -330,7 +330,7 @@ class XudongCodeReviewCompatibilityTests(unittest.TestCase):
             output_path.write_text(json.dumps(FINAL_REPORT))
             return subprocess.CompletedProcess(command, 0, "", "")
 
-        with tempfile.TemporaryDirectory(prefix="xudong-code-review-codex-workspace-test.") as tmpdir:
+        with tempfile.TemporaryDirectory(prefix="code-review-codex-workspace-test.") as tmpdir:
             repo = Path(tmpdir)
             (repo / ".env").write_text("ignored environment fixture\n")
             with mock.patch.dict(
@@ -338,31 +338,31 @@ class XudongCodeReviewCompatibilityTests(unittest.TestCase):
                 {"CODEX_HOME": ""},
                 clear=False,
             ), mock.patch.object(
-                XUDONG_CODE_REVIEW,
+                CODE_REVIEW,
                 "resolve_command",
                 return_value="/usr/bin/codex",
             ), mock.patch.object(
-                XUDONG_CODE_REVIEW,
+                CODE_REVIEW,
                 "ensure_codex_isolation_supported",
                 return_value="/usr/bin/codex",
             ), mock.patch.object(
-                XUDONG_CODE_REVIEW,
+                CODE_REVIEW,
                 "codex_auth_config_flags",
                 return_value=[],
             ), mock.patch.object(
-                XUDONG_CODE_REVIEW,
+                CODE_REVIEW,
                 "prepare_codex_runtime_auth",
                 return_value=None,
             ), mock.patch.object(
-                XUDONG_CODE_REVIEW,
+                CODE_REVIEW,
                 "codex_source_home",
                 return_value=None,
             ), mock.patch.object(
-                XUDONG_CODE_REVIEW,
+                CODE_REVIEW,
                 "run_with_heartbeat",
                 side_effect=fake_run,
             ):
-                output = XUDONG_CODE_REVIEW.run_codex(args, repo, "review")
+                output = CODE_REVIEW.run_codex(args, repo, "review")
 
             self.assertEqual(json.loads(output), FINAL_REPORT)
             observed_cwd = observed["cwd"]
