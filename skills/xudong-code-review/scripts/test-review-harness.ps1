@@ -3,9 +3,6 @@ param(
     [ValidateSet('malicious', 'benign')]
     [string] $Fixture,
 
-    [ValidateSet('codex', 'claude', 'amp', 'pi', 'kimi')]
-    [string[]] $Engine,
-
     [Alias('h')]
     [switch] $Help
 )
@@ -21,12 +18,6 @@ if ($Help) {
 
 if ($PSBoundParameters.ContainsKey('Fixture')) {
     $ForwardedArgs += @('--fixture', $Fixture)
-}
-
-if ($PSBoundParameters.ContainsKey('Engine')) {
-    foreach ($SelectedEngine in $Engine) {
-        $ForwardedArgs += @('--engine', $SelectedEngine)
-    }
 }
 
 $PyLauncher = Get-Command py -ErrorAction SilentlyContinue

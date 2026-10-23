@@ -63,7 +63,7 @@ from scripts.utils import validate_skill_name
 
 VIEWER_MODULE_PATH = SKILL_ROOT / "eval-viewer" / "generate_review.py"
 VIEWER_SPEC = importlib.util.spec_from_file_location(
-    "skill_creator_generate_review",
+    "xudong_skill_creator_generate_review",
     VIEWER_MODULE_PATH,
 )
 VIEWER_MODULE = importlib.util.module_from_spec(VIEWER_SPEC)
@@ -729,7 +729,7 @@ class TestCaseRunnerTests(unittest.TestCase):
         self.assertTrue(prompt.endswith(DELIVERABLE_INSTRUCTION))
 
     def test_builds_medium_workspace_command(self):
-        run_dir = Path("/tmp/skill-creator/eval/with_skill/run-1")
+        run_dir = Path("/tmp/xudong-skill-creator/eval/with_skill/run-1")
         output_path = run_dir / "outputs" / "final.md"
 
         command = build_test_command(
@@ -882,14 +882,14 @@ class TestCaseRunnerTests(unittest.TestCase):
                         "type": "command_execution",
                         "command": (
                             "sed -n 1,200p "
-                            ".agents/skills/skill-creator/SKILL.md"
+                            ".agents/skills/xudong-skill-creator/SKILL.md"
                         ),
                         "status": "completed",
                     },
                 }) + "\n",
                 encoding="utf-8",
             )
-            global_copy = Path.home() / ".agents/skills/skill-creator"
+            global_copy = Path.home() / ".agents/skills/xudong-skill-creator"
 
             violations = audit_trace_for_protected_sources(
                 trace_path,
@@ -1060,10 +1060,10 @@ class SkillNameValidationTests(unittest.TestCase):
 class GraderWrapperTests(unittest.TestCase):
     def test_builds_schema_constrained_high_reasoning_command(self):
         run_dir = Path(
-            "/tmp/skill-creator/eval-0/with_skill/run-1"
+            "/tmp/xudong-skill-creator/eval-0/with_skill/run-1"
         ).resolve()
         metadata_path = Path(
-            "/tmp/skill-creator/eval-0/eval_metadata.json"
+            "/tmp/xudong-skill-creator/eval-0/eval_metadata.json"
         ).resolve()
         output_path = run_dir / "grading.json"
 

@@ -17,7 +17,7 @@ npx skills add https://github.com/xudongcc/skills \
 
 ```sh
 npx skills add https://github.com/xudongcc/skills \
-  --skill skill-creator \
+  --skill xudong-skill-creator \
   --agent universal \
   --copy \
   -y
@@ -29,10 +29,9 @@ npx skills add https://github.com/xudongcc/skills \
 
 | Skill                                                            | 描述                                                                                                                                                                                                                      |
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [autoreview](skills/autoreview/)                                 | Structured Codex, Claude, Amp, Pi, or Kimi code review when explicitly requested.                                                                                                                                         |
-| [i18next](skills/i18next/)                                       | Automatically maintain i18next during normal development, including runtime usage, keys and namespaces, local resources and translations, language loading, generated types, and i18next-cli extraction and verification. |
-| [openclaw-lark-send-message](skills/openclaw-lark-send-message/) | Send Feishu/Lark messages, create native user or bot mentions, resolve recipient IDs, test bot reachability, and troubleshoot mentions rendered as plain text.                                                            |
-| [skill-creator](skills/skill-creator/)                           | Create new skills, modify and improve existing skills, and measure skill performance. Use for skill creation, editing, evals, benchmarking with variance analysis, and trigger-description optimization.                  |
+| [xudong-code-review](skills/xudong-code-review/)                                 | Structured Codex code review when explicitly requested.                                                                                                                                         |
+| [xudong-i18next](skills/xudong-i18next/)                                       | Automatically maintain i18next during normal development, including runtime usage, keys and namespaces, local resources and translations, language loading, generated types, and i18next-cli extraction and verification. |
+| [xudong-skill-creator](skills/xudong-skill-creator/)                           | Create new skills, modify and improve existing skills, and measure skill performance. Use for skill creation, editing, evals, benchmarking with variance analysis, and trigger-description optimization.                  |
 
 <!-- END GENERATED SKILLS -->
 
@@ -43,5 +42,5 @@ npx skills add https://github.com/xudongcc/skills \
 修改 skill 后运行快速校验：
 
 ```sh
-python3 skills/skill-creator/scripts/quick_validate.py skills/<skill-name>
+python3 skills/xudong-skill-creator/scripts/quick_validate.py skills/<skill-name>
 ```

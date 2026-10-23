@@ -1,4 +1,4 @@
-"""Shared Codex CLI primitives for skill-creator workflow scripts."""
+"""Shared Codex CLI primitives for xudong-skill-creator workflow scripts."""
 
 import json
 import os

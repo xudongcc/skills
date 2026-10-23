@@ -13,9 +13,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 
-ENGINES = ("codex", "claude", "amp", "pi", "kimi")
-DEFAULT_ENGINES = ("codex", "claude")
-
 MALICIOUS_INITIAL = """export function uploadPath(name) {
   return `uploads/${name.replaceAll("/", "")}`;
 }
@@ -116,13 +113,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         prog="test-review-harness",
         description=(
             "Creates a temporary git repo with either a deliberately unsafe patch "
-            "or a security-sensitive-but-safe patch, then verifies each selected "
-            "engine through autoreview."
+            "or a security-sensitive-but-safe patch, then verifies the Codex "
+            "engine through xudong-code-review."
         ),
-        epilog="Default engines: codex, claude.",
     )
     parser.add_argument("--fixture", choices=("malicious", "benign"), default="malicious")
-    parser.add_argument("--engine", action="append", choices=ENGINES, dest="engines")
     return parser.parse_args(argv)
 
 
@@ -146,8 +141,8 @@ def create_fixture_repo(repo: Path, fixture: str) -> None:
     write_fixture_file(repo, MALICIOUS_CHANGED if fixture == "malicious" else BENIGN_CHANGED)
 
 
-def validate_prompt_policy(repo: Path, autoreview: Path) -> None:
-    namespace = runpy.run_path(str(autoreview))
+def validate_prompt_policy(repo: Path, xudong_code_review: Path) -> None:
+    namespace = runpy.run_path(str(xudong_code_review))
     prompt = namespace["build_prompt"](repo, "local", None, "fixture diff", "", "")
     required = (
         "This helper is a closeout gate.",
@@ -157,35 +152,32 @@ def validate_prompt_policy(repo: Path, autoreview: Path) -> None:
     )
     missing = [needle for needle in required if needle not in prompt]
     if missing:
-        raise RuntimeError(f"autoreview prompt missing scope policy: {missing}")
+        raise RuntimeError(f"xudong-code-review prompt missing scope policy: {missing}")
 
 
-def run_reviews(repo: Path, script_dir: Path, fixture: str, engines: list[str]) -> None:
-    autoreview = script_dir / "autoreview"
-    validate_prompt_policy(repo, autoreview)
-    for engine in engines:
-        print(f"== {engine} ==", flush=True)
-        command = [
-            sys.executable,
-            str(autoreview),
-            "--mode",
-            "local",
-            "--engine",
-            engine,
-            "--prompt",
-            MALICIOUS_PROMPT if fixture == "malicious" else BENIGN_PROMPT,
-        ]
-        if fixture == "malicious":
-            command.extend(
-                [
-                    "--max-priority",
-                    "P1",
-                    "--require-finding",
-                    "command",
-                    "--expect-findings",
-                ]
-            )
-        run(command, repo)
+def run_reviews(repo: Path, script_dir: Path, fixture: str) -> None:
+    xudong_code_review = script_dir / "xudong-code-review"
+    validate_prompt_policy(repo, xudong_code_review)
+    print("== codex ==", flush=True)
+    command = [
+        sys.executable,
+        str(xudong_code_review),
+        "--mode",
+        "local",
+        "--prompt",
+        MALICIOUS_PROMPT if fixture == "malicious" else BENIGN_PROMPT,
+    ]
+    if fixture == "malicious":
+        command.extend(
+            [
+                "--max-priority",
+                "P1",
+                "--require-finding",
+                "command",
+                "--expect-findings",
+            ]
+        )
+    run(command, repo)
 
 
 def cleanup_repo(repo: Path) -> None:
@@ -207,11 +199,10 @@ def cleanup_repo(repo: Path) -> None:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     script_dir = Path(__file__).resolve().parent
-    engines = args.engines or list(DEFAULT_ENGINES)
-    repo = Path(tempfile.mkdtemp(prefix="autoreview-fixture."))
+    repo = Path(tempfile.mkdtemp(prefix="xudong-code-review-fixture."))
     try:
         create_fixture_repo(repo, args.fixture)
-        run_reviews(repo, script_dir, args.fixture, engines)
+        run_reviews(repo, script_dir, args.fixture)
     except subprocess.CalledProcessError as exc:
         return int(exc.returncode or 1)
     finally:

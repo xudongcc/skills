@@ -1,5 +1,5 @@
 {
-  "skill_name": "skill-creator",
+  "skill_name": "xudong-skill-creator",
   "evals": [
     {
       "id": 1,
@@ -59,7 +59,7 @@
     {
       "id": 4,
       "name": "review-description-triggers",
-      "prompt": "Design description-triggering evals for the attached incident-timeline-writer SKILL.md.fixture template. Generate 20 realistic queries, with 10 positive and 10 negative cases. Negative cases must be near-miss false-trigger scenarios that share terms such as incident, timeline, or report. Save eval_set.json and an interactive review.html generated from the skill-creator assets/eval_review.html template under outputs/description-review/. Let me review them first; do not run the optimization loop or modify the input fixture.",
+      "prompt": "Design description-triggering evals for the attached incident-timeline-writer SKILL.md.fixture template. Generate 20 realistic queries, with 10 positive and 10 negative cases. Negative cases must be near-miss false-trigger scenarios that share terms such as incident, timeline, or report. Save eval_set.json and an interactive review.html generated from the xudong-skill-creator assets/eval_review.html template under outputs/description-review/. Let me review them first; do not run the optimization loop or modify the input fixture.",
       "expected_output": "Generate a balanced, realistic, and discriminating trigger-query set plus an interactive review page that covers implicit positive cases and difficult near-miss negative cases while preserving the original description until user review.",
       "files": [
         "evals/fixtures/incident-timeline-writer/SKILL.md.fixture"

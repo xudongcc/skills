@@ -1,9 +1,9 @@
 ---
-name: i18next
+name: xudong-i18next
 description: "Use for implementation, review, diagnosis, and maintenance of localized user-facing behavior in JavaScript or TypeScript apps and services where i18next, react-i18next, or i18next-cli owns the affected package. Automatically maintain t()/Trans calls, semantic keys and namespaces, repository-local locale resources and missing translations, plural/interpolation/rich-text semantics, language onboarding/loading/selection/routing/fallback, generated types, and i18next-cli extraction/status/lint/sync/key renames as part of feature and copy work—even when the prompt does not mention internationalization. Also use for explicit i18next setup, adoption, or migration."
 ---
 
-# i18next
+# Xudong i18next
 
 Treat internationalization as part of normal feature development in an existing
 i18next project. When a requested code change affects user-visible language,

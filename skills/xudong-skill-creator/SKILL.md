@@ -1,9 +1,9 @@
 ---
-name: skill-creator
+name: xudong-skill-creator
 description: Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.
 ---
 
-# Skill Creator
+# Xudong Skill Creator
 
 A skill for creating new skills and iteratively improving them.
 
@@ -167,16 +167,16 @@ Treat this section as one continuous sequence and do not stop after launching ru
 Create the evaluation workspace once:
 
 ```bash
-python <skill-creator-path>/scripts/create_eval_workspace.py \
+python <xudong-skill-creator-path>/scripts/create_eval_workspace.py \
   --skill-path <path-to-skill>
 ```
 
-The printed temporary path contains an immutable `.skill-creator-workspace.json` with the workspace identity and original skill location. Preserve required artifacts before removing the workspace.
+The printed temporary path contains an immutable `.skill-creator-workspace.json` with the workspace identity and original skill location. The marker filename stays unchanged so existing evaluation workspaces remain readable. Preserve required artifacts before removing the workspace.
 
 Prepare each comparison as a separate iteration:
 
 ```bash
-python <skill-creator-path>/scripts/create_iteration.py <workspace> \
+python <xudong-skill-creator-path>/scripts/create_iteration.py <workspace> \
   --baseline <none|previous|path-to-skill> \
   --runs 3 \
   --model <model-id>
@@ -203,7 +203,7 @@ iteration-N/
 For every eval and run number, start the candidate and baseline together:
 
 ```bash
-python <skill-creator-path>/scripts/run_test_case.py <run-dir>
+python <xudong-skill-creator-path>/scripts/run_test_case.py <run-dir>
 ```
 
 The run directory is the only argument. The wrapper validates the enclosing manifests, reads the prompt, model, installed snapshot, and protected comparison sources from them, and writes `trace.jsonl`, `outputs/final.md`, `outputs/metrics.json`, and `timing.json`. It installs a physical skill copy under the run-local `.agents/skills/` when that configuration has a skill.
@@ -255,13 +255,13 @@ Once all runs are done:
 
 1. **Grade each run** — first use deterministic scripts for expectations that can be checked programmatically. For qualitative expectations, use the bundled grading wrapper, which applies `references/grading.schema.json`, validates the required run evidence, and writes `grading.json`:
    ```bash
-   python <skill-creator-path>/scripts/run_grader.py <run-dir>
+   python <xudong-skill-creator-path>/scripts/run_grader.py <run-dir>
    ```
    The `grading.json` expectations array must use `text`, `passed`, and `evidence`; the viewer depends on these exact fields. `--output-schema` makes the qualitative grader stable enough to aggregate across runs, while deterministic checks remain the source of truth for commands, files, and other directly observable behavior.
 
 2. **Aggregate into benchmark** — the aggregator requires every run declared in `iteration.json` to be completed and graded:
    ```bash
-   python <skill-creator-path>/scripts/aggregate_benchmark.py \
+   python <xudong-skill-creator-path>/scripts/aggregate_benchmark.py \
      <workspace>/iteration-N
    ```
    This produces `benchmark.json` and `benchmark.md` with pass rate, time, and tokens for each configuration, with mean ± standard deviation and the delta. If generating benchmark.json manually, see `references/schemas.md` for the exact schema the viewer expects.
@@ -271,7 +271,7 @@ The manifest orders `new_skill` before its baseline so delta direction stays con
 
 4. **Generate the viewer** with both qualitative outputs and quantitative data:
    ```bash
-   python <skill-creator-path>/eval-viewer/generate_review.py \
+   python <xudong-skill-creator-path>/eval-viewer/generate_review.py \
      <workspace>/iteration-N
    ```
    This writes `review.html` inside the iteration, loads `benchmark.json` when present, and includes the previous iteration recorded by the manifest. Open or present that artifact with the host's file-viewing capability. Feedback is downloaded as `feedback.json` when the user clicks "Submit All Reviews"; copy it into the iteration directory for the next round.

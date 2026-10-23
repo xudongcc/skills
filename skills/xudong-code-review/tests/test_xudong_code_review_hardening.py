@@ -6,22 +6,19 @@ import contextlib
 import io
 import json
 import os
-import re
 import runpy
 import shutil
 import signal
-import stat
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import unittest
 from unittest import mock
 from pathlib import Path, PureWindowsPath
 
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "autoreview"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "xudong-code-review"
 FIXTURES = Path(__file__).with_name("fixtures")
 PRIVATE_KEY_BEGIN_TEXT = "BEGIN " + "PRIVATE KEY"
 RSA_PRIVATE_KEY_BEGIN_TEXT = "BEGIN RSA " + "PRIVATE KEY"
@@ -45,7 +42,7 @@ from pathlib import Path
 import sys
 
 args = sys.argv[1:]
-if invocations := os.environ.get("AUTOREVIEW_FAKE_CODEX_INVOCATIONS"):
+if invocations := os.environ.get("XUDONG_CODE_REVIEW_FAKE_CODEX_INVOCATIONS"):
     selected_env = {
         key: os.environ.get(key)
         for key in (
@@ -64,9 +61,9 @@ if invocations := os.environ.get("AUTOREVIEW_FAKE_CODEX_INVOCATIONS"):
 if "--version" in args or "-v" in args:
     print("codex-cli 0.0.0-test")
     raise SystemExit(0)
-record = os.environ["AUTOREVIEW_FAKE_RECORD"]
+record = os.environ["XUDONG_CODE_REVIEW_FAKE_RECORD"]
 Path(record).write_text(json.dumps({"argv": args, "cwd": os.getcwd(), "stdin": sys.stdin.read()}))
-if mutation := os.environ.get("AUTOREVIEW_FAKE_MUTATE"):
+if mutation := os.environ.get("XUDONG_CODE_REVIEW_FAKE_MUTATE"):
     Path(mutation).write_text("mutated during review\n")
 try:
     output_path = args[args.index("--output-last-message") + 1]
@@ -83,106 +80,18 @@ print("fake codex ok")
 '''
 
 
-def fake_claude_script() -> str:
-    return r'''#!/usr/bin/env python3
-import json
-import os
-from pathlib import Path
-import sys
-
-args = sys.argv[1:]
-if "--version" in args or "-v" in args:
-    print(os.environ.get("AUTOREVIEW_FAKE_CLAUDE_VERSION", "2.1.170 (Claude Code)"))
-    raise SystemExit(0)
-if "--help" in args or "-h" in args:
-    print("--safe-mode\n--setting-sources\n--strict-mcp-config\n--disallowedTools\n--tools\n--print\n--json-schema")
-    raise SystemExit(0)
-record = os.environ["AUTOREVIEW_FAKE_RECORD"]
-Path(record).write_text(json.dumps({
-    "argv": args,
-    "cwd": os.getcwd(),
-    "stdin": sys.stdin.read(),
-    "auto_memory_disabled": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY"),
-}))
-report = {
-    "findings": [],
-    "overall_correctness": "patch is correct",
-    "overall_explanation": "fake claude clean",
-    "overall_confidence": 0.99,
-}
-print(json.dumps(report))
-'''
-
-
-def fake_pi_script() -> str:
-    return r'''#!/usr/bin/env python3
-import json
-import os
-from pathlib import Path
-import sys
-
-args = sys.argv[1:]
-invocations = os.environ.get("AUTOREVIEW_FAKE_PI_INVOCATIONS")
-if invocations:
-    with open(invocations, "a", encoding="utf-8") as file:
-        file.write(json.dumps({"argv": args, "cwd": os.getcwd()}) + "\n")
-if "--version" in args or "-v" in args:
-    print(os.environ.get("AUTOREVIEW_FAKE_PI_VERSION", "0.79.0"))
-    raise SystemExit(0)
-if "--help" in args or "-h" in args:
-    print(os.environ.get("AUTOREVIEW_FAKE_PI_HELP", "--print\n--no-approve\n--no-session\n--no-context-files\n--no-extensions\n--no-skills\n--no-prompt-templates\n--no-themes\n--tools\n--no-tools\n--thinking"))
-    raise SystemExit(0)
-record = os.environ["AUTOREVIEW_FAKE_RECORD"]
-Path(record).write_text(json.dumps({"argv": args, "cwd": os.getcwd(), "stdin": sys.stdin.read()}))
-report = {
-    "findings": [],
-    "overall_correctness": "patch is correct",
-    "overall_explanation": "fake pi clean",
-    "overall_confidence": 0.99,
-}
-print(json.dumps(report))
-	'''
-
-
-def fake_kimi_script() -> str:
-    return r'''#!/usr/bin/env python3
-import json
-import os
-from pathlib import Path
-import sys
-
-args = sys.argv[1:]
-if "--version" in args or "-v" in args:
-    print(os.environ.get("AUTOREVIEW_FAKE_KIMI_VERSION", "0.30.0"))
-    raise SystemExit(0)
-if "--help" in args or "-h" in args:
-    print(os.environ.get("AUTOREVIEW_FAKE_KIMI_HELP", "--agent-file\n--skills-dir\n--prompt\n--output-format\n--model"))
-    raise SystemExit(0)
-record = os.environ.get("AUTOREVIEW_FAKE_RECORD")
-if record:
-    Path(record).write_text(json.dumps({"argv": args, "cwd": os.getcwd(), "stdin": sys.stdin.read()}))
-report = {
-    "findings": [],
-    "overall_correctness": "patch is correct",
-    "overall_explanation": "fake kimi clean",
-    "overall_confidence": 0.99,
-}
-print(json.dumps(report))
-'''
-
-
 def load_helper() -> dict[str, object]:
-    return runpy.run_path(str(SCRIPT), run_name="autoreview_under_test")
+    return runpy.run_path(str(SCRIPT), run_name="xudong-code-review_under_test")
 
 
 def git(repo: Path, *args: str) -> str:
     env = os.environ.copy()
     env.update(
         {
-            "GIT_AUTHOR_NAME": "Autoreview Test",
-            "GIT_AUTHOR_EMAIL": "autoreview@example.invalid",
-            "GIT_COMMITTER_NAME": "Autoreview Test",
-            "GIT_COMMITTER_EMAIL": "autoreview@example.invalid",
+            "GIT_AUTHOR_NAME": "XudongCodeReview Test",
+            "GIT_AUTHOR_EMAIL": "xudong-code-review@example.invalid",
+            "GIT_COMMITTER_NAME": "XudongCodeReview Test",
+            "GIT_COMMITTER_EMAIL": "xudong-code-review@example.invalid",
         }
     )
     result = subprocess.run(
@@ -201,8 +110,8 @@ def init_repo(tempdir: Path) -> Path:
     repo = tempdir / "repo"
     repo.mkdir()
     git(repo, "init", "-q")
-    git(repo, "config", "user.name", "Autoreview Test")
-    git(repo, "config", "user.email", "autoreview@example.invalid")
+    git(repo, "config", "user.name", "XudongCodeReview Test")
+    git(repo, "config", "user.email", "xudong-code-review@example.invalid")
     return repo
 
 
@@ -249,7 +158,7 @@ def path_excluding_command(name: str) -> str:
     return os.pathsep.join(kept)
 
 
-class AutoreviewHardeningTests(unittest.TestCase):
+class XudongCodeReviewHardeningTests(unittest.TestCase):
     def setUp(self) -> None:
         self.helper = load_helper()
 
@@ -370,11 +279,6 @@ class AutoreviewHardeningTests(unittest.TestCase):
 
             self.assertIn(self.helper["REVIEW_SECURITY_OMISSION"], bundle)
             self.assertFalse(truncated)
-
-    def test_powershell_harness_exposes_runnable_engines_only(self) -> None:
-        harness = SCRIPT.with_name("test-review-harness.ps1").read_text(encoding="utf-8")
-
-        self.assertIn("[ValidateSet('codex', 'claude', 'amp', 'pi', 'kimi')]", harness)
 
     def test_local_bundle_omits_sensitive_untracked_file_without_blocking(self) -> None:
         for rel in (".env", "tokens/session.dat", "secrets/local.py"):
@@ -955,28 +859,6 @@ class AutoreviewHardeningTests(unittest.TestCase):
         )
         self.assertTrue(all("Oversized review bundle chunk:" in prompt for prompt in prompts))
 
-    def test_kimi_prompt_budget_partitions_before_argv_limits(self) -> None:
-        if os.name == "nt":
-            self.skipTest("the 30 KiB Windows argv budget cannot fit the chunk-context reservation")
-        with tempfile.TemporaryDirectory() as tempdir:
-            repo = init_repo(Path(tempdir))
-            prompts = self.helper["build_review_prompts"](
-                repo,
-                "commit",
-                "HEAD",
-                "# Commit Diff\n" + "safe review content\n" * 12_000,
-                "",
-                "",
-                self.helper["KIMI_MAX_PROMPT_BYTES"],
-            )
-
-        self.assertGreater(len(prompts), 1)
-        self.assertTrue(
-            all(
-                len(prompt.encode("utf-8")) <= self.helper["KIMI_MAX_PROMPT_BYTES"]
-                for prompt in prompts
-            )
-        )
 
     def test_review_prompt_preserves_bundle_ending_whitespace(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -1663,156 +1545,11 @@ class AutoreviewHardeningTests(unittest.TestCase):
             self.assertIn('-const request = { token: "test-token" };', bundle)
             self.assertFalse(truncated)
 
-    def test_pi_refuses_truncated_review_input(self) -> None:
-        reviewer = argparse.Namespace(engine="pi", tools=True)
-
-        with self.assertRaisesRegex(SystemExit, "pi engine refused truncated review input"):
-            self.helper["ensure_reviewer_input_complete"](
-                reviewer,
-                True,
-            )
-
-        self.helper["ensure_reviewer_input_complete"](
-            reviewer,
-            False,
-        )
+    def test_codex_refuses_truncated_review_input(self) -> None:
+        reviewer = argparse.Namespace(engine="codex", tools=True)
         with self.assertRaisesRegex(SystemExit, "codex engine refused truncated review input"):
-            self.helper["ensure_reviewer_input_complete"](
-                argparse.Namespace(engine="codex", tools=True),
-                True,
-            )
-        with self.assertRaisesRegex(SystemExit, "claude engine refused truncated review input"):
-            self.helper["ensure_reviewer_input_complete"](
-                argparse.Namespace(engine="claude", tools=True),
-                True,
-            )
-        with self.assertRaisesRegex(SystemExit, "kimi engine refused truncated review input"):
-            self.helper["ensure_reviewer_input_complete"](
-                argparse.Namespace(engine="kimi", tools=False),
-                True,
-            )
-
-    def test_kimi_config_is_sanitized_without_losing_model_auth(self) -> None:
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            share = root / "kimi-home"
-            share.mkdir()
-            (share / "config.toml").write_text(
-                "\n".join(
-                    [
-                        'default_model = "review-model"',
-                        'extra_skill_dirs = ["/tmp/unsafe-skills"]',
-                        "",
-                        "[models.review-model]",
-                        'provider = "review-provider"',
-                        'model = "kimi-k2"',
-                        "max_context_size = 100000",
-                        "",
-                        "[providers.review-provider]",
-                        'type = "kimi"',
-                        'base_url = "https://api.example.invalid"',
-                        'api_key = "test-token"',
-                        "",
-                        "[services.moonshot_search]",
-                        'base_url = "http://localhost"',
-                        "",
-                        "[thinking]",
-                        "enabled = false",
-                        "",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-            with mock.patch.dict(
-                os.environ,
-                {"KIMI_CODE_HOME": str(share)},
-                clear=False,
-            ):
-                config, source_share = self.helper["load_kimi_review_config"](repo)
-
-        self.assertEqual(source_share, share.resolve())
-        self.assertEqual(config["default_model"], "review-model")
-        self.assertEqual(
-            config["providers"]["review-provider"]["api_key"],
-            "test-token",
-        )
-        self.assertNotIn("services", config)
-        self.assertNotIn("extra_skill_dirs", config)
-        self.assertNotIn("thinking", config)
-        self.assertNotIn("hooks", config)
-
-    def test_kimi_oauth_credentials_are_linked_outside_runtime_state(self) -> None:
-        if os.name == "nt":
-            self.skipTest("directory symlink privileges vary on Windows")
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            source_share = root / "source-kimi"
-            credentials = source_share / "credentials"
-            credentials.mkdir(parents=True)
-            device_id = "0123456789abcdef0123456789abcdef"
-            (source_share / "device_id").write_text(device_id, encoding="utf-8")
-            runtime_share = root / "runtime-kimi"
-            runtime_share.mkdir()
-
-            self.helper["prepare_kimi_runtime_auth"](
-                repo,
-                source_share,
-                runtime_share,
-            )
-
-            linked = runtime_share / "credentials"
-            self.assertTrue(linked.is_symlink())
-            self.assertEqual(linked.resolve(), credentials.resolve())
-            self.assertEqual(
-                (runtime_share / "device_id").read_text(encoding="utf-8"),
-                device_id,
-            )
-
-    def test_kimi_rejects_repo_controlled_config_symlink(self) -> None:
-        if os.name == "nt":
-            self.skipTest("directory symlink privileges vary on Windows")
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            hostile_config = repo / "kimi-config.toml"
-            hostile_config.write_text("default_model = \"x\"\n", encoding="utf-8")
-            share = root / "kimi-home"
-            share.mkdir()
-            (share / "config.toml").symlink_to(hostile_config)
-
-            with mock.patch.dict(
-                os.environ,
-                {"KIMI_CODE_HOME": str(share)},
-                clear=False,
-            ), self.assertRaisesRegex(
-                SystemExit,
-                "must resolve outside",
-            ):
-                self.helper["load_kimi_review_config"](repo)
-
-    def test_kimi_engine_env_preserves_only_supported_runtime_overrides(self) -> None:
-        with tempfile.TemporaryDirectory() as tempdir:
-            repo = init_repo(Path(tempdir))
-            with mock.patch.dict(
-                os.environ,
-                {
-                    "KIMI_API_KEY": "test-token",
-                    "KIMI_BASE_URL": "https://api.example.invalid",
-                    "KIMI_MODEL_NAME": "kimi-model",
-                    "KIMI_CODE_HOME": str(repo / ".hostile-kimi"),
-                    "PYTHONPATH": "/tmp/hostile-python",
-                },
-                clear=False,
-            ):
-                env = self.helper["safe_engine_env"](repo, engine="kimi")
-
-        self.assertEqual(env["KIMI_API_KEY"], "test-token")
-        self.assertEqual(env["KIMI_BASE_URL"], "https://api.example.invalid")
-        self.assertEqual(env["KIMI_MODEL_NAME"], "kimi-model")
-        self.assertNotIn("KIMI_CODE_HOME", env)
-        self.assertNotIn("PYTHONPATH", env)
+            self.helper["ensure_reviewer_input_complete"](reviewer, True)
+        self.helper["ensure_reviewer_input_complete"](reviewer, False)
 
     def test_safe_git_env_preserves_trusted_platform_and_helper_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -1968,8 +1705,9 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 os.environ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
 
                 env = self.helper["safe_engine_env"](repo, engine="codex")
-                claude_env = self.helper["safe_engine_env"](repo, engine="claude")
-                pi_env = self.helper["safe_engine_env"](repo, engine="pi")
+                self.assertNotIn("CLAUDE_CONFIG_DIR", env)
+                self.assertNotIn("PI_CODING_AGENT_DIR", env)
+                self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
 
                 self.assertNotEqual(env.get("GIT_DIR"), "/tmp/unsafe-git-dir")
                 self.assertEqual(
@@ -2006,34 +1744,6 @@ class AutoreviewHardeningTests(unittest.TestCase):
                         "unix:path=/run/user/1000/bus",
                     )
                 self.assertEqual(env["XDG_RUNTIME_DIR"], "/run/user/1000")
-                self.assertEqual(
-                    claude_env["CLAUDE_CONFIG_DIR"],
-                    "/tmp/claude-auth",
-                )
-                self.assertEqual(
-                    claude_env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"],
-                    "1",
-                )
-                self.assertEqual(pi_env["PI_CODING_AGENT_DIR"], "/tmp/pi-auth")
-                self.assertEqual(claude_env["CLAUDE_CODE_USE_FOUNDRY"], "1")
-                self.assertEqual(claude_env["CLOUD_ML_REGION"], "us-east5")
-                self.assertEqual(
-                    claude_env["ANTHROPIC_AUTH_TOKEN"],
-                    "test-auth-token",
-                )
-                self.assertEqual(
-                    claude_env["AWS_BEARER_TOKEN_BEDROCK"],
-                    "test-token-placeholder",
-                )
-                self.assertEqual(
-                    claude_env["ANTHROPIC_BEDROCK_BASE_URL"],
-                    "https://bedrock.example.invalid",
-                )
-                self.assertEqual(
-                    claude_env["ANTHROPIC_VERTEX_BASE_URL"],
-                    "https://vertex.example.invalid",
-                )
-                self.assertEqual(claude_env["AWS_PROFILE"], "review-profile")
                 self.assertNotIn("AWS_CONFIG_FILE", env)
                 self.assertNotIn("GOOGLE_APPLICATION_CREDENTIALS", env)
                 self.assertNotIn(
@@ -2041,10 +1751,6 @@ class AutoreviewHardeningTests(unittest.TestCase):
                     env,
                 )
                 self.assertNotIn("OPENROUTER_API_KEY", env)
-                self.assertEqual(
-                    claude_env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"],
-                    "1",
-                )
             finally:
                 os.environ.clear()
                 os.environ.update(old)
@@ -2355,7 +2061,6 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 before,
             )
 
-    @unittest.skipIf(os.name == "nt", "the true command is POSIX-only")
     @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
     def test_cli_detects_source_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -2375,8 +2080,8 @@ class AutoreviewHardeningTests(unittest.TestCase):
             add_fake_trufflehog(self.helper, root, env)
             env.update(
                 {
-                    "AUTOREVIEW_FAKE_MUTATE": str(source),
-                    "AUTOREVIEW_FAKE_RECORD": str(record_path),
+                    "XUDONG_CODE_REVIEW_FAKE_MUTATE": str(source),
+                    "XUDONG_CODE_REVIEW_FAKE_RECORD": str(record_path),
                     "HOME": str(root),
                     "USERPROFILE": str(root),
                 }
@@ -2388,8 +2093,6 @@ class AutoreviewHardeningTests(unittest.TestCase):
                     str(SCRIPT),
                     "--mode",
                     "local",
-                    "--engine",
-                    "codex",
                     "--codex-bin",
                     str(codex_bin),
                 ],
@@ -2547,92 +2250,6 @@ class AutoreviewHardeningTests(unittest.TestCase):
             ):
                 self.helper["safe_temp_root"](repo)
 
-    @unittest.skipIf(os.name == "nt", "POSIX Testbox temp-root behavior")
-    def test_claude_fable_alias_requires_fable_safe_mode_version(self) -> None:
-        args = argparse.Namespace(
-            claude_bin="claude",
-            fallback_model=None,
-            model="fable",
-        )
-        version_result = subprocess.CompletedProcess(
-            ["claude", "--version"],
-            0,
-            "2.1.169 (Claude Code)",
-            "",
-        )
-
-        with tempfile.TemporaryDirectory() as tempdir:
-            repo = init_repo(Path(tempdir))
-            with mock.patch.dict(
-                self.helper["ensure_claude_isolation_supported"].__globals__,
-                {
-                    "resolve_command": lambda *_args: "/usr/bin/claude",
-                    "safe_engine_env": lambda *_args, **_kwargs: {},
-                    "safe_temp_root": lambda _repo: Path(tempdir),
-                    "run": lambda *_args, **_kwargs: version_result,
-                },
-            ), self.assertRaisesRegex(
-                SystemExit,
-                "2.1.170",
-            ):
-                self.helper["ensure_claude_isolation_supported"](args, repo)
-
-    def test_claude_canonical_fable_model_uses_portable_cli_selector(self) -> None:
-        self.assertEqual(
-            self.helper["claude_cli_model_selector"]("claude-fable-5"),
-            "fable",
-        )
-        self.assertEqual(
-            self.helper["claude_cli_fallback_models"](
-                "claude-fable-5,claude-opus-5"
-            ),
-            "fable,claude-opus-5",
-        )
-
-    def test_claude_runs_outside_repo_with_auto_memory_disabled(self) -> None:
-        args = argparse.Namespace(
-            claude_allowed_tools=None,
-            claude_bin="claude",
-            fallback_model=None,
-            model=None,
-            stream_engine_output=False,
-            thinking=None,
-            tools=False,
-            web_search=False,
-        )
-        observed: dict[str, object] = {}
-
-        def fake_run(
-            _cmd: list[str],
-            cwd: Path,
-            **kwargs: object,
-        ) -> subprocess.CompletedProcess[str]:
-            observed["cwd"] = cwd
-            observed["env"] = kwargs["env"]
-            return subprocess.CompletedProcess([], 0, "{}", "")
-
-        with tempfile.TemporaryDirectory() as tempdir:
-            repo = init_repo(Path(tempdir))
-            with mock.patch.dict(
-                self.helper["run_claude"].__globals__,
-                {
-                    "ensure_claude_isolation_supported": lambda *_args: None,
-                    "resolve_command": lambda *_args: "/usr/bin/claude",
-                    "run_with_heartbeat": fake_run,
-                    "safe_engine_env": lambda *_args, **_kwargs: {
-                        "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"
-                    },
-                },
-            ):
-                self.helper["run_claude"](args, repo, "prompt")
-
-            self.assertFalse(
-                self.helper["is_within"](observed["cwd"], repo.resolve())
-            )
-            self.assertEqual(
-                observed["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"],
-                "1",
-            )
 
     def test_codex_env_rejects_executable_dbus_transport(self) -> None:
         old = os.environ.copy()
@@ -2648,154 +2265,6 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 os.environ.clear()
                 os.environ.update(old)
 
-    def test_multi_provider_engines_preserve_provider_auth(self) -> None:
-        old = os.environ.copy()
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir).resolve()
-            repo = init_repo(root)
-            try:
-                os.environ["DEEPSEEK_API_KEY"] = "test-token-placeholder"
-                os.environ["CEREBRAS_API_KEY"] = "test-token-placeholder"
-                os.environ["CLOUDFLARE_ACCOUNT_ID"] = "test-account"
-                os.environ["CLOUDFLARE_API_TOKEN"] = "test-token-placeholder"
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = (
-                    str(root / "provider-credentials.json")
-                )
-                os.environ["AWS_ROLE_ARN"] = (
-                    "arn:aws:iam::123456789012:role/autoreview"
-                )
-                os.environ["AWS_CONTAINER_AUTHORIZATION_TOKEN"] = (
-                    "test-token-placeholder"
-                )
-                os.environ["AWS_CONTAINER_CREDENTIALS_FULL_URI"] = (
-                    "http://169.254.170.2/credentials"
-                )
-                os.environ["AWS_WEB_IDENTITY_TOKEN_FILE"] = str(
-                    root / "web-identity",
-                )
-                os.environ["AWS_CONFIG_FILE"] = str(root / "aws-config")
-                os.environ["AWS_SHARED_CREDENTIALS_FILE"] = str(
-                    root / "aws-credentials",
-                )
-                os.environ["NODE_EXTRA_CA_CERTS"] = str(root / "corporate-ca.pem")
-                os.environ["SSL_CERT_FILE"] = str(root / "tls-ca.pem")
-                os.environ["SSL_CERT_DIR"] = str(root / "tls-ca")
-                os.environ["SNOWFLAKE_ACCOUNT"] = "test-account"
-                os.environ["SNOWFLAKE_CORTEX_TOKEN"] = "test-token-placeholder"
-                os.environ["AZURE_RESOURCE_NAME"] = "test-resource"
-                os.environ["ANTHROPIC_OAUTH_TOKEN"] = "test-token-placeholder"
-                os.environ["AWS_BEDROCK_FORCE_HTTP1"] = "1"
-                os.environ["AWS_BEDROCK_SKIP_AUTH"] = "1"
-                os.environ["AZURE_CLIENT_ID"] = "test-client"
-                os.environ["AZURE_CLIENT_SECRET"] = "test-token-placeholder"
-                os.environ["AZURE_TENANT_ID"] = "test-tenant"
-                os.environ["GCLOUD_PROJECT"] = "test-project"
-                os.environ["GOOGLE_CLOUD_PROJECT"] = "test-project"
-                os.environ["CODEX_API_KEY"] = "test-token-placeholder"
-                os.environ["CODEX_CA_CERTIFICATE"] = str(root / "codex-ca.pem")
-                os.environ["COPILOT_GITHUB_TOKEN"] = "test-token-placeholder"
-                os.environ["PI_OFFLINE"] = "1"
-                os.environ["PI_SKIP_VERSION_CHECK"] = "1"
-                os.environ["PI_TELEMETRY"] = "0"
-                os.environ["NPM_TOKEN"] = "test-token-placeholder"
-                os.environ["SENTRY_API_KEY"] = "test-token-placeholder"
-                os.environ["SENTRY_AUTH_TOKEN"] = "test-token-placeholder"
-                os.environ["DIGITALOCEAN_ACCESS_TOKEN"] = "test-token-placeholder"
-                os.environ["GITLAB_TOKEN"] = "test-token-placeholder"
-                os.environ["NODE_OPTIONS"] = "--require=/tmp/unsafe.js"
-                os.environ["GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES"] = "1"
-                env = self.helper["safe_engine_env"](repo, engine="pi")
-                for key in (
-                            "AWS_ROLE_ARN",
-                            "AWS_CONTAINER_AUTHORIZATION_TOKEN",
-                            "AWS_CONTAINER_CREDENTIALS_FULL_URI",
-                            "AWS_BEDROCK_FORCE_HTTP1",
-                            "AWS_BEDROCK_SKIP_AUTH",
-                            "AWS_CONFIG_FILE",
-                            "AWS_SHARED_CREDENTIALS_FILE",
-                            "AWS_WEB_IDENTITY_TOKEN_FILE",
-                            "CEREBRAS_API_KEY",
-                            "CLOUDFLARE_ACCOUNT_ID",
-                            "CLOUDFLARE_API_TOKEN",
-                            "COPILOT_GITHUB_TOKEN",
-                            "DEEPSEEK_API_KEY",
-                            "GOOGLE_APPLICATION_CREDENTIALS",
-                            "NODE_EXTRA_CA_CERTS",
-                            "SSL_CERT_DIR",
-                            "SSL_CERT_FILE",
-                            "SNOWFLAKE_ACCOUNT",
-                            "SNOWFLAKE_CORTEX_TOKEN",
-                            "AZURE_RESOURCE_NAME",
-                            "ANTHROPIC_OAUTH_TOKEN",
-                ):
-                    self.assertEqual(env[key], os.environ[key])
-                self.assertNotIn("NODE_OPTIONS", env)
-                self.assertNotIn("NPM_TOKEN", env)
-                self.assertNotIn("SENTRY_API_KEY", env)
-                self.assertNotIn("SENTRY_AUTH_TOKEN", env)
-                self.assertNotIn("GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES", env)
-                self.assertNotIn("DIGITALOCEAN_ACCESS_TOKEN", env)
-                self.assertNotIn("GITLAB_TOKEN", env)
-                self.assertEqual(env["PI_OFFLINE"], "1")
-                self.assertEqual(env["PI_SKIP_VERSION_CHECK"], "1")
-                self.assertEqual(env["PI_TELEMETRY"], "0")
-
-                claude_env = self.helper["safe_engine_env"](repo, engine="claude")
-                for key in (
-                    "AZURE_CLIENT_ID",
-                    "AZURE_CLIENT_SECRET",
-                    "AZURE_TENANT_ID",
-                    "GCLOUD_PROJECT",
-                    "GOOGLE_CLOUD_PROJECT",
-                    "AWS_ROLE_ARN",
-                    "AWS_CONFIG_FILE",
-                    "AWS_SHARED_CREDENTIALS_FILE",
-                    "AWS_WEB_IDENTITY_TOKEN_FILE",
-                    "GOOGLE_APPLICATION_CREDENTIALS",
-                    "NODE_EXTRA_CA_CERTS",
-                    "SSL_CERT_DIR",
-                    "SSL_CERT_FILE",
-                ):
-                    self.assertEqual(claude_env[key], os.environ[key])
-                self.assertNotIn("DEEPSEEK_API_KEY", claude_env)
-                self.assertNotIn("NODE_OPTIONS", claude_env)
-                codex_env = self.helper["safe_engine_env"](repo, engine="codex")
-                for key in (
-                    "CODEX_API_KEY",
-                    "CODEX_CA_CERTIFICATE",
-                    "SSL_CERT_DIR",
-                    "SSL_CERT_FILE",
-                ):
-                    self.assertEqual(codex_env[key], os.environ[key])
-            finally:
-                os.environ.clear()
-                os.environ.update(old)
-
-    def test_multi_provider_custom_credentials_require_explicit_safe_names(self) -> None:
-        old = os.environ.copy()
-        with tempfile.TemporaryDirectory() as tempdir:
-            repo = init_repo(Path(tempdir))
-            try:
-                os.environ["CORP_LLM_API_KEY"] = "test-token-placeholder"
-                os.environ["CORP_AUTH_TOKEN"] = "test-token-placeholder"
-                os.environ["AUTOREVIEW_PROVIDER_ENV_ALLOW"] = (
-                    "CORP_LLM_API_KEY,CORP_AUTH_TOKEN"
-                )
-
-                env = self.helper["safe_engine_env"](repo, engine="pi")
-                self.assertEqual(env["CORP_LLM_API_KEY"], os.environ["CORP_LLM_API_KEY"])
-                self.assertEqual(env["CORP_AUTH_TOKEN"], os.environ["CORP_AUTH_TOKEN"])
-                self.assertNotIn("AUTOREVIEW_PROVIDER_ENV_ALLOW", env)
-
-                os.environ["AUTOREVIEW_PROVIDER_ENV_ALLOW"] = "NODE_OPTIONS"
-                with self.assertRaisesRegex(
-                    SystemExit,
-                    "invalid AUTOREVIEW_PROVIDER_ENV_ALLOW entry",
-                ):
-                    self.helper["safe_engine_env"](repo, engine="pi")
-            finally:
-                os.environ.clear()
-                os.environ.update(old)
 
     def test_provider_credential_paths_are_forwarded_as_absolute(self) -> None:
         old_env = os.environ.copy()
@@ -2805,16 +2274,16 @@ class AutoreviewHardeningTests(unittest.TestCase):
             repo = init_repo(root)
             try:
                 os.chdir(repo)
-                os.environ["AWS_CONFIG_FILE"] = "../shared/aws-config"
+                os.environ["CODEX_CA_CERTIFICATE"] = "../shared/codex-ca.pem"
                 os.environ["SSL_CERT_DIR"] = os.pathsep.join(
                     ("../tls/one", "../tls/two"),
                 )
 
-                env = self.helper["safe_engine_env"](repo, engine="pi")
+                env = self.helper["safe_engine_env"](repo, engine="codex")
 
                 self.assertEqual(
-                    env["AWS_CONFIG_FILE"],
-                    str((root / "shared" / "aws-config").resolve()),
+                    env["CODEX_CA_CERTIFICATE"],
+                    str((root / "shared" / "codex-ca.pem").resolve()),
                 )
                 self.assertEqual(
                     env["SSL_CERT_DIR"],
@@ -2842,16 +2311,12 @@ class AutoreviewHardeningTests(unittest.TestCase):
                 os.environ["SSL_CERT_FILE"] = str(repo / "tls-ca.pem")
                 os.environ["HOME"] = str(repo)
                 os.environ["USERPROFILE"] = str(repo)
-                claude_env = self.helper["safe_engine_env"](repo, engine="claude")
                 codex_env = self.helper["safe_engine_env"](repo, engine="codex")
-                pi_env = self.helper["safe_engine_env"](repo, engine="pi")
-                self.assertNotIn("CLAUDE_CONFIG_DIR", claude_env)
                 self.assertNotIn("CODEX_HOME", codex_env)
                 self.assertNotIn("CODEX_CA_CERTIFICATE", codex_env)
                 self.assertNotIn("SSL_CERT_FILE", codex_env)
-                self.assertNotIn("PI_CODING_AGENT_DIR", pi_env)
-                self.assertNotIn("HOME", claude_env)
-                self.assertNotIn("USERPROFILE", claude_env)
+                self.assertNotIn("HOME", codex_env)
+                self.assertNotIn("USERPROFILE", codex_env)
             finally:
                 os.environ.clear()
                 os.environ.update(old)
@@ -3079,8 +2544,8 @@ class AutoreviewHardeningTests(unittest.TestCase):
             "shell_environment_policy.ignore_default_excludes=false",
             "shell_environment_policy.experimental_use_profile=false",
             "allow_login_shell=false",
-            'default_permissions="autoreview"',
-            'permissions.autoreview.filesystem={":minimal"="read",":workspace_roots"="read"}',
+            'default_permissions="xudong-code-review"',
+            'permissions.xudong-code-review.filesystem={":minimal"="read",":workspace_roots"="read"}',
         ):
             self.assertIn(required, flags)
         set_flag = next(
@@ -3453,35 +2918,6 @@ class AutoreviewHardeningTests(unittest.TestCase):
                     "--dataset",
                 )
 
-    def test_claude_inventory_is_bundle_and_web_only(self) -> None:
-        args = argparse.Namespace(
-            claude_allowed_tools="WebFetch(domain:docs.example.com),WebSearch",
-            web_search=True,
-        )
-
-        self.assertEqual(
-            self.helper["claude_allowed_tools"](args),
-            "WebFetch(domain:docs.example.com),WebSearch",
-        )
-        self.assertEqual(
-            self.helper["claude_tool_inventory"](args),
-            "WebFetch,WebSearch",
-        )
-
-        args.web_search = False
-        self.assertEqual(
-            self.helper["claude_allowed_tools"](args),
-            "",
-        )
-
-        args.claude_allowed_tools = "Read"
-        with self.assertRaisesRegex(SystemExit, "not read-only"):
-            self.helper["claude_tool_inventory"](args)
-
-        args.web_search = True
-        args.claude_allowed_tools = "WebFetch"
-        with self.assertRaisesRegex(SystemExit, "one explicit domain"):
-            self.helper["claude_tool_inventory"](args)
 
     def test_review_patch_allows_safe_multiline_call_hunks(self) -> None:
         patch = (
@@ -3508,7 +2944,6 @@ class AutoreviewHardeningTests(unittest.TestCase):
     def test_stream_displays_escape_terminal_controls(self) -> None:
         control = chr(27) + "]52;c;VEVTVA==" + chr(7)
         codex = self.helper["CodexStreamDisplay"]()
-        claude = self.helper["ClaudeStreamDisplay"]()
         codex_message = json.dumps(
             {
                 "type": "item.completed",
@@ -3522,7 +2957,6 @@ class AutoreviewHardeningTests(unittest.TestCase):
         for displayed in (
             codex("stdout", codex_message + "\n"),
             codex("stderr", control + "\n"),
-            claude("stderr", control + "\n"),
         ):
             self.assertIsNotNone(displayed)
             assert displayed is not None
@@ -3565,17 +2999,6 @@ class AutoreviewHardeningTests(unittest.TestCase):
             self.assertIn(r"\x07", displayed)
             self.assertTrue(displayed.endswith("\n"))
 
-    def test_resolve_engine_binary_rejects_codex_no_tools(self) -> None:
-        # run_codex() unconditionally refuses --no-tools (see line ~10318);
-        # the preflight must report that same rejection instead of reporting
-        # codex available just because its binary resolves.
-        resolve_engine_binary = self.helper["resolve_engine_binary"]
-        reviewer = argparse.Namespace(engine="codex", tools=False, codex_bin="codex")
-        available, reason = resolve_engine_binary(reviewer, Path("."))
-        self.assertFalse(available)
-        self.assertIn("--no-tools", reason)
-        self.assertIn("not supported by the Codex engine", reason)
-
     def test_resolve_engine_binary_checks_path_resolution(self) -> None:
         resolve_engine_binary = self.helper["resolve_engine_binary"]
         with tempfile.TemporaryDirectory() as tempdir:
@@ -3597,8 +3020,8 @@ class AutoreviewHardeningTests(unittest.TestCase):
             self.assertIsNone(reason)
 
             missing = argparse.Namespace(
-                engine="claude",
-                claude_bin="definitely-not-a-real-claude-binary",
+                engine="codex",
+                codex_bin="definitely-not-a-real-codex-binary",
             )
             available, reason = resolve_engine_binary(missing, repo)
             self.assertFalse(available)
@@ -3673,8 +3096,6 @@ os.execv(target, [str(target), *sys.argv[1:]])
                     str(SCRIPT),
                     "--mode",
                     "local",
-                    "--engine",
-                    "codex",
                     "--dry-run",
                 ],
                 cwd=repo,
@@ -3688,19 +3109,16 @@ os.execv(target, [str(target), *sys.argv[1:]])
             self.assertRegex(result.stdout, r"engine check: codex[^\n]* UNAVAILABLE")
             self.assertIn(str(launcher), result.stdout)
             self.assertIn("--codex-bin", result.stdout)
-            self.assertIn("CODEX_BIN", result.stdout)
             self.assertIn("correct PATH", result.stdout)
 
             invocations = root / "codex-invocations.jsonl"
-            env["AUTOREVIEW_FAKE_CODEX_INVOCATIONS"] = str(invocations)
+            env["XUDONG_CODE_REVIEW_FAKE_CODEX_INVOCATIONS"] = str(invocations)
             normal_run = subprocess.run(
                 [
                     sys.executable,
                     str(SCRIPT),
                     "--mode",
                     "local",
-                    "--engine",
-                    "codex",
                 ],
                 cwd=repo,
                 env=env,
@@ -3749,8 +3167,8 @@ os.execv(target, [str(target), *sys.argv[1:]])
             add_fake_trufflehog(self.helper, root, env)
             env.update(
                 {
-                    "AUTOREVIEW_FAKE_CODEX_INVOCATIONS": str(invocations),
-                    "AUTOREVIEW_FAKE_RECORD": str(record),
+                    "XUDONG_CODE_REVIEW_FAKE_CODEX_INVOCATIONS": str(invocations),
+                    "XUDONG_CODE_REVIEW_FAKE_RECORD": str(record),
                     "CODEX_HOME": str(source_home),
                 }
             )
@@ -3763,8 +3181,6 @@ os.execv(target, [str(target), *sys.argv[1:]])
                     str(SCRIPT),
                     "--mode",
                     "local",
-                    "--engine",
-                    "codex",
                     "--codex-bin",
                     str(direct_bin),
                     "--dry-run",
@@ -3796,8 +3212,6 @@ os.execv(target, [str(target), *sys.argv[1:]])
                     str(SCRIPT),
                     "--mode",
                     "local",
-                    "--engine",
-                    "codex",
                     "--codex-bin",
                     str(direct_bin),
                 ],
@@ -3869,8 +3283,6 @@ os.execv(target, [str(target), *sys.argv[1:]])
                     str(SCRIPT),
                     "--mode",
                     "local",
-                    "--engine",
-                    "codex",
                     "--codex-bin",
                     str(codex_bin),
                     "--dry-run",
@@ -3918,8 +3330,6 @@ os.execv(target, [str(target), *sys.argv[1:]])
                     str(SCRIPT),
                     "--mode",
                     "local",
-                    "--engine",
-                    "codex",
                     "--codex-bin",
                     str(codex_bin),
                     "--dry-run",
@@ -3961,8 +3371,6 @@ os.execv(target, [str(target), *sys.argv[1:]])
                     str(SCRIPT),
                     "--mode",
                     "local",
-                    "--engine",
-                    "codex",
                     "--codex-bin",
                     str(codex_bin),
                     "--dry-run",
@@ -3994,8 +3402,6 @@ os.execv(target, [str(target), *sys.argv[1:]])
                     str(SCRIPT),
                     "--mode",
                     "local",
-                    "--engine",
-                    "codex",
                     "--no-tools",
                     "--dry-run",
                 ],
@@ -4010,8 +3416,6 @@ os.execv(target, [str(target), *sys.argv[1:]])
             self.assertIn("--no-tools", result.stdout)
 
     @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
     def test_dry_run_flag_exits_nonzero_when_engine_binary_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
@@ -4023,10 +3427,8 @@ os.execv(target, [str(target), *sys.argv[1:]])
                     str(SCRIPT),
                     "--mode",
                     "local",
-                    "--engine",
-                    "claude",
-                    "--claude-bin",
-                    "definitely-not-a-real-claude-binary",
+                    "--codex-bin",
+                    "definitely-not-a-real-codex-binary",
                     "--dry-run",
                 ],
                 cwd=repo,
@@ -4133,8 +3535,6 @@ os.execv(target, [str(target), *sys.argv[1:]])
                     "commit",
                     "--commit",
                     "HEAD",
-                    "--engine",
-                    "codex",
                     "--codex-bin",
                     str(codex_bin),
                     "--dry-run",
@@ -4150,440 +3550,20 @@ os.execv(target, [str(target), *sys.argv[1:]])
             self.assertIn("bundle: constructible", result.stdout)
             self.assertIn("prompt: OK", result.stdout)
 
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
-    def test_dry_run_flag_exits_nonzero_when_pi_version_unsupported(self) -> None:
-        # run_pi() calls ensure_pi_isolation_supported(), which requires
-        # Pi >= 0.79.0 for --no-approve trust isolation before the CLI is
-        # ever invoked for a review; --dry-run must reuse that same local
-        # --version probe rather than reporting pi available just because
-        # the binary resolves on PATH.
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            pi_bin = write_executable(
-                root / "pi",
-                fake_pi_script(),
-            )
-            env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
-            env["AUTOREVIEW_FAKE_PI_VERSION"] = "0.50.0"
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "local",
-                    "--engine",
-                    "pi",
-                    "--pi-bin",
-                    str(pi_bin),
-                    "--dry-run",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"engine check: pi[^\n]* UNAVAILABLE")
-            self.assertIn("0.79.0", result.stdout)
-
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
-    def test_dry_run_flag_exits_zero_when_pi_version_supported(self) -> None:
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            source = repo / "source.txt"
-            source.write_text("staged\n", encoding="utf-8")
-            git(repo, "add", "source.txt")
-            pi_bin = write_executable(
-                root / "pi",
-                fake_pi_script(),
-            )
-            env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "local",
-                    "--engine",
-                    "pi",
-                    "--pi-bin",
-                    str(pi_bin),
-                    "--dry-run",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"engine check: pi[^\n]* OK\b")
-
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
-    def test_dry_run_flag_exits_nonzero_when_kimi_version_unsupported(self) -> None:
-        # run_kimi() calls ensure_kimi_isolation_supported(), which requires
-        # Kimi Code CLI >= 0.30.0 before the CLI is ever invoked for a
-        # review; --dry-run must reuse that same local --version probe
-        # rather than reporting kimi available just because the binary
-        # resolves on PATH.
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            kimi_bin = write_executable(
-                root / "kimi",
-                fake_kimi_script(),
-            )
-            env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
-            env["AUTOREVIEW_FAKE_KIMI_VERSION"] = "0.10.0"
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "local",
-                    "--engine",
-                    "kimi",
-                    "--kimi-bin",
-                    str(kimi_bin),
-                    "--dry-run",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"engine check: kimi[^\n]* UNAVAILABLE")
-            self.assertIn("0.30.0", result.stdout)
-
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
-    def test_dry_run_flag_exits_zero_when_kimi_version_supported(self) -> None:
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            source = repo / "source.txt"
-            source.write_text("staged\n", encoding="utf-8")
-            git(repo, "add", "source.txt")
-            kimi_bin = write_executable(
-                root / "kimi",
-                fake_kimi_script(),
-            )
-            env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
-            # Isolate KIMI_CODE_HOME to an empty, hermetic directory instead
-            # of leaking the host's real ~/.kimi-code (which may or may not
-            # exist) into this test; an empty source share has no
-            # device_id/credentials to validate and must still report OK.
-            env["KIMI_CODE_HOME"] = str(root / "kimi-empty-home")
-            (root / "kimi-empty-home").mkdir()
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "local",
-                    "--engine",
-                    "kimi",
-                    "--kimi-bin",
-                    str(kimi_bin),
-                    "--dry-run",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"engine check: kimi[^\n]* OK\b")
-
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
-    def test_dry_run_flag_exits_nonzero_when_kimi_config_repo_controlled(self) -> None:
-        # run_kimi() calls load_kimi_review_config() before the CLI is ever
-        # invoked for a review, and that rejects a KIMI_CODE_HOME pointed
-        # inside the reviewed repository (see kimi_source_share); --dry-run
-        # must reuse that same local config load rather than reporting kimi
-        # available just because the CLI binary and version resolved.
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            source = repo / "source.txt"
-            source.write_text("staged\n", encoding="utf-8")
-            git(repo, "add", "source.txt")
-            kimi_bin = write_executable(
-                root / "kimi",
-                fake_kimi_script(),
-            )
-            env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
-            env["KIMI_CODE_HOME"] = str(repo / ".kimi-code")
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "local",
-                    "--engine",
-                    "kimi",
-                    "--kimi-bin",
-                    str(kimi_bin),
-                    "--dry-run",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"engine check: kimi[^\n]* UNAVAILABLE")
-            self.assertIn(
-                "Kimi configuration must be outside the reviewed repository",
-                result.stdout,
-            )
-            # The bundle, inputs, and prompt assembly still resolve; only the
-            # Kimi-specific config load fails.
-            self.assertIn("prompt: OK", result.stdout)
-
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
-    def test_dry_run_flag_exits_nonzero_when_kimi_device_id_invalid(self) -> None:
-        # run_kimi() calls prepare_kimi_runtime_auth() after
-        # load_kimi_review_config() and before the CLI is ever invoked for
-        # a review; that raises on a device_id that fails the safe-to-stage
-        # format check (see validate_kimi_runtime_auth_sources). --dry-run
-        # must reuse that same non-mutating check rather than reporting
-        # kimi available just because the CLI binary, version, and config
-        # load resolved.
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            source = repo / "source.txt"
-            source.write_text("staged\n", encoding="utf-8")
-            git(repo, "add", "source.txt")
-            kimi_bin = write_executable(
-                root / "kimi",
-                fake_kimi_script(),
-            )
-            source_share = root / "kimi-home"
-            source_share.mkdir()
-            (source_share / "device_id").write_text("not-a-valid-id!!", encoding="utf-8")
-            env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
-            env["KIMI_CODE_HOME"] = str(source_share)
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "local",
-                    "--engine",
-                    "kimi",
-                    "--kimi-bin",
-                    str(kimi_bin),
-                    "--dry-run",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"engine check: kimi[^\n]* UNAVAILABLE")
-            self.assertIn(
-                "Kimi device identity is not safe to stage for review",
-                result.stdout,
-            )
-            # The bundle, inputs, and prompt assembly still resolve; only the
-            # Kimi-specific auth source check fails.
-            self.assertIn("prompt: OK", result.stdout)
-
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
-    def test_dry_run_flag_exits_nonzero_when_kimi_credentials_not_a_directory(self) -> None:
-        # Same raising check as above (see
-        # validate_kimi_runtime_auth_sources), triggered instead by a
-        # credentials path that resolves to a file rather than a directory
-        # -- the same shape of error a real run's prepare_kimi_runtime_auth()
-        # would raise on before ever invoking the CLI.
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            source = repo / "source.txt"
-            source.write_text("staged\n", encoding="utf-8")
-            git(repo, "add", "source.txt")
-            kimi_bin = write_executable(
-                root / "kimi",
-                fake_kimi_script(),
-            )
-            source_share = root / "kimi-home"
-            source_share.mkdir()
-            (source_share / "credentials").write_text("not-a-directory", encoding="utf-8")
-            env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
-            env["KIMI_CODE_HOME"] = str(source_share)
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "local",
-                    "--engine",
-                    "kimi",
-                    "--kimi-bin",
-                    str(kimi_bin),
-                    "--dry-run",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"engine check: kimi[^\n]* UNAVAILABLE")
-            self.assertIn(
-                "Kimi OAuth credentials must be an external directory outside the reviewed repository",
-                result.stdout,
-            )
-            self.assertIn("prompt: OK", result.stdout)
-
-    @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
-    def test_dry_run_flag_exits_zero_when_kimi_auth_sources_valid(self) -> None:
-        # A validly staged device_id and OAuth credentials directory (the
-        # shape prepare_kimi_runtime_auth() accepts and stages for a real
-        # run) must still report kimi OK under --dry-run.
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            source = repo / "source.txt"
-            source.write_text("staged\n", encoding="utf-8")
-            git(repo, "add", "source.txt")
-            kimi_bin = write_executable(
-                root / "kimi",
-                fake_kimi_script(),
-            )
-            source_share = root / "kimi-home"
-            source_share.mkdir()
-            (source_share / "device_id").write_text(
-                "0123456789abcdef0123456789abcdef", encoding="utf-8"
-            )
-            (source_share / "credentials").mkdir()
-            env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
-            env["KIMI_CODE_HOME"] = str(source_share)
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "local",
-                    "--engine",
-                    "kimi",
-                    "--kimi-bin",
-                    str(kimi_bin),
-                    "--dry-run",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"engine check: kimi[^\n]* OK\b")
-
-    def test_dry_run_flag_exits_nonzero_when_claude_tool_not_read_only(self) -> None:
-        # run_claude() computes its --tools inventory via
-        # claude_allowed_tools()/claude_tool_inventory() before the CLI is
-        # ever invoked for a review, and that raises when a configured
-        # --claude-allowed-tools rule is not one of the read-only tools
-        # (see claude_tool_inventory); --dry-run must reuse that same
-        # pure, non-mutating computation rather than reporting claude
-        # available just because the CLI binary, version, and isolation
-        # flags resolved.
-        with tempfile.TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
-            repo = init_repo(root)
-            source = repo / "source.txt"
-            source.write_text("staged\n", encoding="utf-8")
-            git(repo, "add", "source.txt")
-            claude_bin = write_executable(
-                root / "claude",
-                fake_claude_script(),
-            )
-            env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--mode",
-                    "local",
-                    "--engine",
-                    "claude",
-                    "--claude-bin",
-                    str(claude_bin),
-                    "--claude-allowed-tools",
-                    "Bash",
-                    "--dry-run",
-                ],
-                cwd=repo,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"engine check: claude[^\n]* UNAVAILABLE")
-            self.assertIn("Claude review tool is not read-only: Bash", result.stdout)
-            self.assertIn("prompt: OK", result.stdout)
 
     @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
     def test_dry_run_flag_exits_nonzero_when_prompt_unpartitionable(self) -> None:
-        # The real run does not stop at load_extra_prompt()'s per-file
-        # checks: main() also builds the final prompt(s) via
-        # build_review_prompts() and rejects context that cannot fit the
-        # aggregate prompt budget even after partitioning (see
-        # build_review_prompts's "leave too little room for change chunks"
-        # branch). Use the Kimi engine's smaller aggregate budget
-        # (KIMI_MAX_PROMPT_BYTES) so a single --prompt-file well under the
-        # per-file 180000-byte scan cap (MAX_BUNDLE_TEXT_BYTES) still blows
-        # the aggregate limit; --dry-run must reuse that same check instead
-        # of reporting readiness for a prompt the real run would refuse.
+        # Repeating one valid evidence file exceeds the aggregate Codex budget
+        # without exceeding the per-file cap; preflight must reject it too.
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
             repo = init_repo(root)
             source = repo / "source.txt"
             source.write_text("staged\n", encoding="utf-8")
             git(repo, "add", "source.txt")
-            kimi_bin = write_executable(
-                root / "kimi",
-                fake_kimi_script(),
+            codex_bin = write_executable(
+                root / "codex",
+                fake_codex_script(),
             )
             env = os.environ.copy()
             add_fake_trufflehog(self.helper, root, env)
@@ -4599,10 +3579,14 @@ os.execv(target, [str(target), *sys.argv[1:]])
                     str(SCRIPT),
                     "--mode",
                     "local",
-                    "--engine",
-                    "kimi",
-                    "--kimi-bin",
-                    str(kimi_bin),
+                    "--codex-bin",
+                    str(codex_bin),
+                    "--prompt-file",
+                    "big-prompt.md",
+                    "--prompt-file",
+                    "big-prompt.md",
+                    "--prompt-file",
+                    "big-prompt.md",
                     "--prompt-file",
                     "big-prompt.md",
                     "--dry-run",
@@ -4621,7 +3605,7 @@ os.execv(target, [str(target), *sys.argv[1:]])
             # assembled-prompt aggregate check fails.
             self.assertIn("bundle: constructible", result.stdout)
             self.assertIn("inputs: OK", result.stdout)
-            self.assertRegex(result.stdout, r"engine check: kimi[^\n]* OK\b")
+            self.assertRegex(result.stdout, r"engine check: codex[^\n]* OK\b")
 
     @unittest.skipIf(os.name == "nt", "the fake executable is POSIX-only")
     def test_dry_run_flag_exits_nonzero_when_prompt_file_missing(self) -> None:
@@ -4649,8 +3633,6 @@ os.execv(target, [str(target), *sys.argv[1:]])
                     str(SCRIPT),
                     "--mode",
                     "local",
-                    "--engine",
-                    "codex",
                     "--codex-bin",
                     str(codex_bin),
                     "--prompt-file",
@@ -4694,8 +3676,6 @@ os.execv(target, [str(target), *sys.argv[1:]])
                     str(SCRIPT),
                     "--mode",
                     "local",
-                    "--engine",
-                    "codex",
                     "--codex-bin",
                     str(codex_bin),
                     "--prompt-file",
@@ -4736,8 +3716,6 @@ os.execv(target, [str(target), *sys.argv[1:]])
                     str(SCRIPT),
                     "--mode",
                     "local",
-                    "--engine",
-                    "codex",
                     "--codex-bin",
                     str(codex_bin),
                     "--dataset",
