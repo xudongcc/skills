@@ -20,8 +20,6 @@ from pathlib import Path, PureWindowsPath
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "code-review"
 FIXTURES = Path(__file__).with_name("fixtures")
-PRIVATE_KEY_BEGIN_TEXT = "BEGIN " + "PRIVATE KEY"
-RSA_PRIVATE_KEY_BEGIN_TEXT = "BEGIN RSA " + "PRIVATE KEY"
 
 
 def write_executable(path: Path, text: str) -> Path:
@@ -65,10 +63,7 @@ if record := __RECORD_PATH__:
     Path(record).write_text(json.dumps({"argv": args, "cwd": os.getcwd(), "stdin": sys.stdin.read()}))
 if mutation := __MUTATION_PATH__:
     Path(mutation).write_text("mutated during review\n")
-try:
-    output_path = args[args.index("--output-last-message") + 1]
-except ValueError:
-    output_path = args[args.index("-o") + 1]
+output_path = args[args.index("--output-last-message") + 1]
 report = {
     "findings": [],
     "overall_correctness": "patch is correct",
@@ -118,24 +113,7 @@ def init_repo(tempdir: Path) -> Path:
     return repo
 
 
-def installed_java() -> str | None:
-    java = shutil.which("java")
-    if java is None:
-        return None
-    try:
-        probe = subprocess.run(
-            [java, "-version"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-    except OSError:
-        return None
-    return java if probe.returncode == 0 else None
-
-
 def add_fake_trufflehog(
-    helper: dict[str, object],
     root: Path,
     env: dict[str, str],
 ) -> None:
@@ -164,38 +142,6 @@ def path_excluding_command(name: str) -> str:
 class CodeReviewHardeningTests(unittest.TestCase):
     def setUp(self) -> None:
         self.helper = load_helper()
-
-    def test_outgoing_pack_scan_reads_exact_prompt_including_deleted_lines(self) -> None:
-        prompt = (
-            "# Change Bundle\n"
-            "diff --git a/config.ts b/config.ts\n"
-            "deleted file mode 100644\n"
-            "--- a/config.ts\n"
-            "+++ /dev/null\n"
-            "@@ -1 +0,0 @@\n"
-            "-const apiKey = \"removed-but-still-sensitive\";\n"
-        )
-        with tempfile.TemporaryDirectory() as tempdir:
-            repo = init_repo(Path(tempdir))
-
-            def run_scanner(
-                command: list[str],
-                cwd: Path,
-                **_kwargs: object,
-            ) -> subprocess.CompletedProcess[str]:
-                self.assertEqual(command[1], "filesystem")
-                self.assertEqual(Path(command[2]).read_text(encoding="utf-8"), prompt)
-                self.assertIn("-const apiKey", prompt)
-                return subprocess.CompletedProcess(command, 0, "", "")
-
-            with mock.patch.dict(
-                self.helper["scan_outgoing_review_pack"].__globals__,
-                {
-                    "find_command": lambda _name, _repo: "/trusted/trufflehog",
-                    "run": run_scanner,
-                },
-            ):
-                self.helper["scan_outgoing_review_pack"](repo, prompt)
 
     def test_outgoing_pack_scan_refuses_and_names_deleted_file(self) -> None:
         prompt = (
@@ -1328,31 +1274,93 @@ class CodeReviewHardeningTests(unittest.TestCase):
             truncated_call_patch,
         )
 
-    def test_review_patch_preserves_safe_uri_userinfo(self) -> None:
-        safe_lines = (
-            'url = f"ssh://{ssh_user}@git.example.invalid/org/repo.git"',
-            'url = "https://alice@github.com/example/repo"',
-            'url = "https://username:@host/repo"',
-            'remote = "ssh://git@github.com/org/repo.git"',
+    def test_review_patch_preserves_source_content(self) -> None:
+        cases = (
+            (
+                'safe_uri_userinfo',
+                'fixture.py',
+                '@@ -0,0 +1 @@\n',
+                '+url = f"ssh://{ssh_user}@git.example.invalid/org/repo.git"\n',
+            ),
+            (
+                'safe_uri_userinfo',
+                'fixture.py',
+                '@@ -0,0 +1 @@\n',
+                '+url = "https://alice@github.com/example/repo"\n',
+            ),
+            (
+                'safe_uri_userinfo',
+                'fixture.py',
+                '@@ -0,0 +1 @@\n',
+                '+url = "https://username:@host/repo"\n',
+            ),
+            (
+                'safe_uri_userinfo',
+                'fixture.py',
+                '@@ -0,0 +1 @@\n',
+                '+remote = "ssh://git@github.com/org/repo.git"\n',
+            ),
+            (
+                'redaction_placeholder_fallback',
+                'runtime.py',
+                '@@ -0,0 +1 @@\n',
+                '+password = getenv("PASSWORD") or "redacted"\n',
+            ),
+            (
+                'ambiguous_short_markerless_lines',
+                'fixture.txt',
+                '@@ -0,0 +1,6 @@\n',
+                '+AB12\n+CDef\n+GH34\n+ijKL\n+MN56\n+opQR\n',
+            ),
+            (
+                'long_non_pem_identifier_lines',
+                'runtime.ts',
+                '@@ -0,0 +1 @@\n',
+                '+runDangerousOperationWithLongIdentifier\n',
+            ),
+            (
+                'hash_and_submodule_lines',
+                'vendor',
+                '@@ -1 +1,2 @@\n',
+                '+abcdef0123456789abcdef0123456789abcdef01\n+Subproject commit abcdef0123456789abcdef0123456789abcdef01\n',
+            ),
+            (
+                'unwrapped_alphabetic_identifier',
+                'runtime.ts',
+                '@@ -0,0 +1 @@\n',
+                '+const AbCdEfGhIjKlMnOp = true;\n',
+            ),
+            (
+                'punctuation_wrapped_alphabetic_identifier',
+                'runtime.ts',
+                '@@ -0,0 +1 @@\n',
+                '+  AbCdEfGhIjKlMnOp,\n',
+            ),
+            (
+                'escaped_newline_beside_alphabetic_identifier',
+                'runtime.ts',
+                '@@ -0,0 +1 @@\n',
+                '+[AbCdEfGhIjKlMnOp, "\\\\n"];\n',
+            ),
+            (
+                'bare_identifier_in_escaped_pem_concatenation',
+                'runtime.ts',
+                '@@ -0,0 +1 @@\n',
+                '+const fixture = "-----BEGIN PRIVATE KEY-----\\n" + AbCdEfGhIjKlMnOp + "\\n-----END PRIVATE KEY-----";\n',
+            ),
         )
-        for line in safe_lines:
-            with self.subTest(line=line):
+        for name, path, hunk, content in cases:
+            with self.subTest(name=name, content=content):
                 patch = (
-                    "diff --git a/fixture.py b/fixture.py\n"
-                    "--- a/fixture.py\n"
-                    "+++ b/fixture.py\n"
-                    "@@ -0,0 +1 @@\n"
-                    f"+{line}\n"
+                    f"diff --git a/{path} b/{path}\n"
+                    f"--- a/{path}\n"
+                    f"+++ b/{path}\n"
+                    f"{hunk}{content}"
                 )
-
-                validated = self.helper["validate_review_patch"](
-                    "local unstaged diff",
-                    ["fixture.py"],
+                self.assertEqual(
+                    self.helper["validate_review_patch"]("local diff", [path], patch),
                     patch,
                 )
-
-                self.assertIn(f"+{line}", validated)
-                self.assertNotIn("redacted@", validated)
 
     def test_branch_bundle_preserves_deleted_jinja_pem_marker_regex(self) -> None:
         # Generic template regex delimiters are not private-key material. The
@@ -1381,157 +1389,6 @@ class CodeReviewHardeningTests(unittest.TestCase):
             self.assertIn("-{{ _body }}", bundle)
             self.assertIn("------END [A-Z ]+-----", bundle)
             self.assertFalse(truncated)
-
-    def test_review_patch_preserves_redaction_placeholder_fallback(self) -> None:
-        patch = (
-            "diff --git a/runtime.py b/runtime.py\n"
-            "--- a/runtime.py\n"
-            "+++ b/runtime.py\n"
-            "@@ -0,0 +1 @@\n"
-            + "+pass"
-            + 'word = getenv("PASSWORD") or "redacted"\n'
-        )
-
-        self.assertEqual(
-            self.helper["validate_review_patch"](
-                "local unstaged diff",
-                ["runtime.py"],
-                patch,
-            ),
-            patch,
-        )
-
-    def test_review_patch_preserves_ambiguous_short_markerless_lines(self) -> None:
-        chunks = ["AB12", "CDef", "GH34", "ijKL", "MN56", "opQR"]
-        patch = (
-            "diff --git a/fixture.txt b/fixture.txt\n"
-            "--- a/fixture.txt\n"
-            "+++ b/fixture.txt\n"
-            f"@@ -0,0 +1,{len(chunks)} @@\n"
-            + "".join(f"+{chunk}\n" for chunk in chunks)
-        )
-
-        redacted_patch = self.helper["validate_review_patch"](
-            "local unstaged diff",
-            ["fixture.txt"],
-            patch,
-        )
-
-        self.assertEqual(redacted_patch, patch)
-
-    def test_review_patch_preserves_long_non_pem_identifier_lines(self) -> None:
-        identifier = "runDangerousOperationWithLongIdentifier"
-        patch = (
-            "diff --git a/runtime.ts b/runtime.ts\n"
-            "--- a/runtime.ts\n"
-            "+++ b/runtime.ts\n"
-            "@@ -0,0 +1 @@\n"
-            + f"+{identifier}\n"
-        )
-
-        redacted = self.helper["validate_review_patch"](
-            "local unstaged diff",
-            ["runtime.ts"],
-            patch,
-        )
-
-        self.assertIn("+" + identifier, redacted)
-
-    def test_review_patch_preserves_hash_and_submodule_lines(self) -> None:
-        digest = "abcdef0123456789abcdef0123456789abcdef01"
-        patch = (
-            "diff --git a/vendor b/vendor\n"
-            "--- a/vendor\n"
-            "+++ b/vendor\n"
-            "@@ -1 +1,2 @@\n"
-            + f"+{digest}\n"
-            + f"+Subproject commit {digest}\n"
-        )
-
-        redacted = self.helper["validate_review_patch"](
-            "local unstaged diff",
-            ["vendor"],
-            patch,
-        )
-
-        self.assertIn("+" + digest, redacted)
-        self.assertIn("+Subproject commit " + digest, redacted)
-
-    def test_review_patch_preserves_unwrapped_alphabetic_identifier(self) -> None:
-        identifier = "AbCdEfGh" + "IjKlMnOp"
-        patch = (
-            "diff --git a/runtime.ts b/runtime.ts\n"
-            "--- a/runtime.ts\n"
-            "+++ b/runtime.ts\n"
-            "@@ -0,0 +1 @@\n"
-            + f"+const {identifier} = true;\n"
-        )
-
-        redacted_patch = self.helper["validate_review_patch"](
-            "local unstaged diff",
-            ["runtime.ts"],
-            patch,
-        )
-
-        self.assertIn(identifier, redacted_patch)
-
-    def test_review_patch_preserves_punctuation_wrapped_alphabetic_identifier(self) -> None:
-        identifier = "AbCdEfGh" + "IjKlMnOp"
-        patch = (
-            "diff --git a/runtime.ts b/runtime.ts\n"
-            "--- a/runtime.ts\n"
-            "+++ b/runtime.ts\n"
-            "@@ -0,0 +1 @@\n"
-            + f"+  {identifier},\n"
-        )
-
-        redacted_patch = self.helper["validate_review_patch"](
-            "local unstaged diff",
-            ["runtime.ts"],
-            patch,
-        )
-
-        self.assertIn(identifier, redacted_patch)
-
-    def test_review_patch_preserves_escaped_newline_beside_alphabetic_identifier(self) -> None:
-        identifier = "AbCdEfGh" + "IjKlMnOp"
-        patch = (
-            "diff --git a/runtime.ts b/runtime.ts\n"
-            "--- a/runtime.ts\n"
-            "+++ b/runtime.ts\n"
-            "@@ -0,0 +1 @@\n"
-            + f'+[{identifier}, "\\\\n"];\n'
-        )
-
-        redacted_patch = self.helper["validate_review_patch"](
-            "local unstaged diff",
-            ["runtime.ts"],
-            patch,
-        )
-
-        self.assertIn(identifier, redacted_patch)
-
-    def test_review_patch_preserves_bare_identifier_in_escaped_pem_concatenation(self) -> None:
-        identifier = "AbCdEfGh" + "IjKlMnOp"
-        patch = (
-            "diff --git a/runtime.ts b/runtime.ts\n"
-            "--- a/runtime.ts\n"
-            "+++ b/runtime.ts\n"
-            "@@ -0,0 +1 @@\n"
-            '+const fixture = "-----BEGIN '
-            + "PRIVATE KEY-----\\n\" + "
-            + identifier
-            + ' + "\\n-----END '
-            + 'PRIVATE KEY-----";\n'
-        )
-
-        redacted_patch = self.helper["validate_review_patch"](
-            "local unstaged diff",
-            ["runtime.ts"],
-            patch,
-        )
-
-        self.assertIn(identifier, redacted_patch)
 
     def test_local_bundle_allows_deleted_test_token_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -2061,7 +1918,7 @@ class CodeReviewHardeningTests(unittest.TestCase):
                 fake_codex_script(record=record_path, mutation=source),
             )
             env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
+            add_fake_trufflehog(root, env)
             env.update(
                 {
                     "HOME": str(root),
@@ -2175,15 +2032,6 @@ class CodeReviewHardeningTests(unittest.TestCase):
                 self.helper["source_tree_snapshot"](repo),
                 before,
             )
-
-    def test_installed_java_rejects_launcher_without_runtime(self) -> None:
-        launcher = "/usr/bin/java"
-        unavailable = subprocess.CompletedProcess([launcher, "-version"], 1)
-        with (
-            mock.patch("shutil.which", return_value=launcher),
-            mock.patch("subprocess.run", return_value=unavailable),
-        ):
-            self.assertIsNone(installed_java())
 
     def test_safe_proxy_url_accepts_credential_free_formats(self) -> None:
         for value in (
@@ -3054,7 +2902,7 @@ os.execv(target, [str(target), *sys.argv[1:]])
 ''',
             )
             env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
+            add_fake_trufflehog(root, env)
             env.update(
                 {
                     "CODEX_HOME": str(source_home),
@@ -3145,7 +2993,7 @@ os.execv(target, [str(target), *sys.argv[1:]])
             )
             invocations = root / "codex-invocations.jsonl"
             env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
+            add_fake_trufflehog(root, env)
             env.update(
                 {
                     "CODEX_HOME": str(source_home),
@@ -3254,7 +3102,7 @@ os.execv(target, [str(target), *sys.argv[1:]])
             # Dry run scans the exact prompt too, so use a deterministic
             # scanner instead of relying on the host installation.
             env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
+            add_fake_trufflehog(root, env)
 
             result = subprocess.run(
                 [
@@ -3292,7 +3140,7 @@ os.execv(target, [str(target), *sys.argv[1:]])
                 fake_codex_script(),
             )
             env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
+            add_fake_trufflehog(root, env)
             repo_temp = repo / "tmp"
             repo_temp.mkdir()
             env.update(
@@ -3504,7 +3352,7 @@ os.execv(target, [str(target), *sys.argv[1:]])
                 fake_codex_script(),
             )
             env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
+            add_fake_trufflehog(root, env)
 
             result = subprocess.run(
                 [
@@ -3545,7 +3393,7 @@ os.execv(target, [str(target), *sys.argv[1:]])
                 fake_codex_script(),
             )
             env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
+            add_fake_trufflehog(root, env)
             prompt_file = repo / "big-prompt.md"
             prompt_file.write_text(
                 "context line filler text here\n" * 5_000,
@@ -3604,7 +3452,7 @@ os.execv(target, [str(target), *sys.argv[1:]])
                 fake_codex_script(),
             )
             env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
+            add_fake_trufflehog(root, env)
 
             result = subprocess.run(
                 [
@@ -3647,7 +3495,7 @@ os.execv(target, [str(target), *sys.argv[1:]])
                 fake_codex_script(),
             )
             env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
+            add_fake_trufflehog(root, env)
 
             result = subprocess.run(
                 [
@@ -3687,7 +3535,7 @@ os.execv(target, [str(target), *sys.argv[1:]])
                 fake_codex_script(),
             )
             env = os.environ.copy()
-            add_fake_trufflehog(self.helper, root, env)
+            add_fake_trufflehog(root, env)
 
             result = subprocess.run(
                 [

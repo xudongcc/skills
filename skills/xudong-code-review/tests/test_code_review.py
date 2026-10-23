@@ -189,8 +189,16 @@ class CodeReviewTruffleHogTests(unittest.TestCase):
             ["review pack"],
         )
 
-    def test_scanner_command_requests_verified_and_unknown_results(self) -> None:
-        prompt = "review pack with redacted examples only"
+    def test_scanner_checks_exact_deleted_diff_with_required_options(self) -> None:
+        prompt = (
+            "# Change Bundle\n"
+            "diff --git a/config.ts b/config.ts\n"
+            "deleted file mode 100644\n"
+            "--- a/config.ts\n"
+            "+++ /dev/null\n"
+            "@@ -1 +0,0 @@\n"
+            '-const apiKey = "removed-but-still-sensitive";\n'
+        )
         with tempfile.TemporaryDirectory() as tempdir:
             repo = Path(tempdir)
 
@@ -199,6 +207,7 @@ class CodeReviewTruffleHogTests(unittest.TestCase):
                 cwd: Path,
                 **kwargs: object,
             ) -> subprocess.CompletedProcess[str]:
+                self.assertEqual(command[1], "filesystem")
                 self.assertEqual(cwd, Path(command[2]).parent)
                 self.assertEqual(Path(command[2]).read_text(encoding="utf-8"), prompt)
                 self.assertEqual(
