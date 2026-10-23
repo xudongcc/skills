@@ -43,46 +43,30 @@ Do not invoke Xudong Code Review automatically before a commit, push, PR, merge,
 
 Xudong Code Review does not expand the task. Fix only verified blockers in the requested path. Mention unrelated findings without opening a new workstream, and stop when the requested review pass is complete.
 
-## Skill Path (set once)
+## Skill Path
 
-Set the skill script paths once, then use `"$XUDONG_CODE_REVIEW"` and `"$XUDONG_CODE_REVIEW_HARNESS"` in the examples below.
-
-Choose one:
-
-```bash
-# Project-local skill in the current repo for Codex and other agents:
-export XUDONG_CODE_REVIEW=".agents/skills/xudong-code-review/scripts/xudong-code-review"
-export XUDONG_CODE_REVIEW_HARNESS=".agents/skills/xudong-code-review/scripts/test-review-harness"
-```
+Invoke the installed script directly from the repository being reviewed. The
+examples below use the global installation at `~/.agents/skills/xudong-code-review`.
+For a project-local installation, replace that prefix with
+`.agents/skills/xudong-code-review`; for a custom installation, use its actual path.
 
 ```bash
-# Global skill:
-export AGENTS_HOME="${AGENTS_HOME:-$HOME/.agents}"
-export XUDONG_CODE_REVIEW="$AGENTS_HOME/skills/xudong-code-review/scripts/xudong-code-review"
-export XUDONG_CODE_REVIEW_HARNESS="$AGENTS_HOME/skills/xudong-code-review/scripts/test-review-harness"
+# Global installation:
+"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --help
+
+# Project-local installation:
+.agents/skills/xudong-code-review/scripts/xudong-code-review --help
 ```
 
-On native Windows, choose the matching pair:
-
-```powershell
-# Project-local skill in the current repo for Codex and other agents:
-$XUDONG_CODE_REVIEW = ".agents\skills\xudong-code-review\scripts\xudong-code-review"
-$XUDONG_CODE_REVIEW_HARNESS = ".agents\skills\xudong-code-review\scripts\test-review-harness.ps1"
-```
-
-```powershell
-# Global skill:
-$AgentsHome = if ($env:AGENTS_HOME) { $env:AGENTS_HOME } else { Join-Path $HOME ".agents" }
-$XUDONG_CODE_REVIEW = Join-Path $AgentsHome "skills\xudong-code-review\scripts\xudong-code-review"
-$XUDONG_CODE_REVIEW_HARNESS = Join-Path $AgentsHome "skills\xudong-code-review\scripts\test-review-harness.ps1"
-```
+On native Windows, run the extensionless helper with Python and use the
+`test-review-harness.ps1` wrapper for the smoke harness, as shown below.
 
 ## Pick Target
 
 Dirty local work:
 
 ```bash
-"$XUDONG_CODE_REVIEW" --mode local
+"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --mode local
 ```
 
 Use this only when the patch is actually unstaged/staged/untracked in the
@@ -95,26 +79,26 @@ only proves there is no local patch.
 Branch/PR work:
 
 ```bash
-"$XUDONG_CODE_REVIEW" --mode branch --base origin/main
+"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --mode branch --base origin/main
 ```
 
 Optional review context is first-class. Prompt files and datasets must be repo-relative so review bundles cannot pull arbitrary host files:
 
 ```bash
-"$XUDONG_CODE_REVIEW" --mode branch --base origin/main --prompt-file review-notes.md --dataset evidence.json
+"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --mode branch --base origin/main --prompt-file review-notes.md --dataset evidence.json
 ```
 
 If an open PR exists, use its actual base:
 
 ```bash
 base=$(gh pr view --json baseRefName --jq .baseRefName)
-"$XUDONG_CODE_REVIEW" --mode branch --base "origin/$base"
+"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --mode branch --base "origin/$base"
 ```
 
 Committed single change:
 
 ```bash
-"$XUDONG_CODE_REVIEW" --mode commit --commit HEAD
+"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --mode commit --commit HEAD
 ```
 
 Use commit review for already-landed or already-pushed work on `main`. Reviewing
@@ -156,9 +140,9 @@ Accepted reasoning levels: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, 
 The helper passes the level through `model_reasoning_effort`.
 
 ```bash
-"$XUDONG_CODE_REVIEW" --model gpt-6.1-sol --thinking high
-"$XUDONG_CODE_REVIEW" --codex-speed fast
-"$XUDONG_CODE_REVIEW" --codex-config 'model_verbosity="low"'
+"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --model gpt-6.1-sol --thinking high
+"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --codex-speed fast
+"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --codex-config 'model_verbosity="low"'
 ```
 
 `--codex-speed` accepts `fast`, `flex`, and `default`; the selected model must
@@ -202,28 +186,28 @@ Run the helper directly so target selection, engine choice, structured validatio
 
 ## Helper
 
-After setting `XUDONG_CODE_REVIEW` and `XUDONG_CODE_REVIEW_HARNESS` above:
+Show the helper options:
 
 ```bash
-"$XUDONG_CODE_REVIEW" --help
+"$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --help
 ```
 
 The smoke harness has thin shell wrappers over a shared Python implementation:
 
 ```bash
-"$XUDONG_CODE_REVIEW_HARNESS" --fixture benign
+"$HOME/.agents/skills/xudong-code-review/scripts/test-review-harness" --fixture benign
 ```
 
 On native Windows, invoke the extensionless Python helper through Python:
 
 ```powershell
-python $XUDONG_CODE_REVIEW --help
+python "$HOME/.agents/skills/xudong-code-review/scripts/xudong-code-review" --help
 ```
 
 and the smoke harness:
 
 ```powershell
-& $XUDONG_CODE_REVIEW_HARNESS -Fixture benign
+& "$HOME/.agents/skills/xudong-code-review/scripts/test-review-harness.ps1" -Fixture benign
 ```
 
 The helper:
