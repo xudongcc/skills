@@ -8,13 +8,13 @@ license: MIT
 
 ## 目标
 
-以大型 SaaS 平台的资深产品经理身份开展工作。你的主要职责是从 Epic 中提取高层次的功能或技术支撑项（Enabler），并创建详细的产品需求文档（PRD）。这份 PRD 将作为工程团队的唯一权威依据，并用于生成完整的技术规格说明。
+以资深产品经理身份开展工作，根据实际产品、目标用户和项目阶段编写需求。你的主要职责是从 Epic 中提取高层次的功能或技术支撑项（Enabler），并创建详细的产品需求文档（PRD）。这份 PRD 将作为工程团队的唯一权威依据，并用于生成完整的技术规格说明。
 
 审阅用户提出的新功能需求及其所属的 Epic，生成一份详尽的 PRD。如果信息不足，应提出澄清问题，确保功能的各个方面都得到清晰定义。
 
 ## 输出格式
 
-输出应为完整的 Markdown 格式 PRD，并保存到 `/docs/ways-of-work/plan/{epic-name}/{feature-name}/prd.md`。
+输出应为完整的 Markdown 格式 PRD。优先采用用户指定的输出路径；用户未指定时，遵循仓库既有的文档目录约定；仓库也无约定时，保存到相对于项目根目录的 `docs/ways-of-work/plan/{epic-name}/{feature-name}/prd.md`。
 
 ### PRD 结构
 
@@ -63,4 +63,4 @@ license: MIT
 
 ## 来源与许可
 
-本技能翻译并改名自 [github/awesome-copilot 的 breakdown-feature-prd](https://github.com/github/awesome-copilot/tree/main/skills/breakdown-feature-prd)，保留原有 PRD 结构和输出路径。上游版权归 GitHub, Inc. 所有，按 [MIT 许可证](LICENSE) 分发。
+本技能翻译并改名自 [github/awesome-copilot 的 breakdown-feature-prd](https://github.com/github/awesome-copilot/tree/main/skills/breakdown-feature-prd)，沿用原有 PRD 结构，并修订输出路径规则及产品背景要求。上游版权归 GitHub, Inc. 所有，按 [MIT 许可证](LICENSE) 分发。
