@@ -1,13 +1,13 @@
 ---
 name: xudong-code-review
-description: "Structured Codex code review when explicitly requested."
+description: "Structured code review with Codex or Antigravity CLI when explicitly requested."
 ---
 
 # Xudong Code Review
 
-Run the bundled structured review helper only when the user explicitly asks for xudong-code-review or a Codex review.
+Run the bundled structured review helper only when the user explicitly asks for xudong-code-review, a Codex review, or an Antigravity review.
 
-Codex is the only supported engine. It uses `gpt-6.1-sol` with `high` reasoning by default and has no model fallback.
+Codex is the default engine, using `gpt-6.1-sol` with `high` reasoning. Select Antigravity explicitly with `--engine antigravity` or its alias `--engine agy`; it uses `agy` with `gemini-4-carbon` and `high` effort by default. Neither engine has a model fallback.
 
 Do not invoke Xudong Code Review automatically before a commit, push, PR, merge, deploy, or final reply. Repository or workflow rules may call it only when they explicitly name it.
 
@@ -24,9 +24,9 @@ Do not invoke Xudong Code Review automatically before a commit, push, PR, merge,
 - Fix the same bug class across its owner-boundary neighborhood when practical; stop at unrelated invariants, different owners, and unapproved contract changes.
 - Run one bounded review pass. If an accepted finding changes code, run the smallest relevant test; rerun Xudong Code Review only when the user explicitly requests another pass.
 - For security-audit suppression changes, verify accepted findings remain auditable: suppressed findings stay in structured output, active output keeps an unsuppressible suppression notice, and aggregate findings cannot hide unrelated active risk.
-- Never switch or override the requested review model. Codex has no model fallback; access, capacity, rate-limit, and unrelated failures are returned directly.
+- Never switch or override the requested review engine or model. Access, capacity, rate-limit, and unrelated failures are returned directly, without fallback.
 - Be patient with large bundles. Structured review can take up to 30 minutes while the model call is active, especially with Codex tools or web search.
-- Treat heartbeat lines like `review still running: ... elapsed=... pid=...` as healthy progress, not a hang. Let the helper continue while heartbeats are advancing. Pass `--stream-engine-output` when live engine text is useful; Codex filters tool/file chatter.
+- Treat heartbeat lines like `review still running: ... elapsed=... pid=...` as healthy progress, not a hang. Let the helper continue while heartbeats are advancing. Pass `--stream-engine-output` for live progress; tool/file chatter stays hidden.
 - Do not kill a review just because it has been quiet for 2-5 minutes, or because it is still running under the 30-minute window. Inspect the process only after missing multiple expected heartbeats, after 30 minutes, or after an obviously failed subprocess; prefer letting the same helper command finish.
 - Tools are useful in review mode. Codex receives the validated bundle in an empty workspace so ignored files and linked-worktree metadata remain unreadable; web search stays available for dependency contracts and upstream docs.
 - Security perspective is always included, but it should not cripple legitimate functionality. Report security findings only when the change creates a concrete, actionable risk or removes an important safety check.
@@ -131,38 +131,52 @@ independently semantic artifacts merely to shrink the review.
 
 ## Model and reasoning
 
-Only Codex is supported. The default model is
-`gpt-6.1-sol`, with `high` reasoning. Use `--model` or `--thinking` for an explicit
-override. There is no automatic model fallback or `--fallback-model` option.
+Select `--engine codex` (default), `--engine antigravity`, or its alias `--engine agy`. Codex defaults to
+`gpt-6.1-sol`, with `high` reasoning. Antigravity defaults to `gemini-4-carbon`
+with `high` effort; run `agy models` to list available models and use `--model`
+to override the model. Use `--thinking` to override effort. Prefer a base model
+name such as `gemini-4-carbon` rather than an effort-suffixed variant, because
+the helper passes effort separately through `--effort`. There is no
+automatic engine/model fallback or `--fallback-model` option.
 Access, capacity, rate-limit, and network failures are returned directly.
 
-Accepted reasoning levels: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`.
-The helper passes the level through `model_reasoning_effort`.
+Codex reasoning levels: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`,
+passed through `model_reasoning_effort`. Antigravity accepts `low`, `medium`,
+`high`, `xhigh`, `max`, passed through `--effort`; the selected model must support
+the requested effort.
 
 ```bash
 "$HOME/.agents/skills/xudong-code-review/scripts/code-review" --model gpt-6.1-sol --thinking high
 "$HOME/.agents/skills/xudong-code-review/scripts/code-review" --codex-speed fast
 "$HOME/.agents/skills/xudong-code-review/scripts/code-review" --codex-config 'model_verbosity="low"'
+
+# Antigravity (authenticate once with interactive agy first):
+"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --engine antigravity --mode local
+"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --engine agy --mode local
+"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --engine antigravity --model gemini-4-carbon --thinking high --mode branch --base origin/main
 ```
 
 `--codex-speed` accepts `fast`, `flex`, and `default`; the selected model must
 support the requested tier. Dedicated options take precedence over matching
 `--codex-config` values. Config overrides accept only safe model/response tuning.
+Both Codex tuning options are rejected with `--engine antigravity`.
 
 ### Configuration
 
 Review settings use fixed defaults and explicit CLI flags; configuration environment
-variables and repository configuration files are not loaded. Defaults are
-`gpt-6.1-sol`, `high` reasoning, P0 through P2 findings, no timeout, and no streamed
+variables and repository configuration files are not loaded. Default models are
+`gpt-6.1-sol` for Codex and `gemini-4-carbon` for Antigravity. Both use `high`
+reasoning, P0 through P2 findings, no timeout, and no streamed
 engine output. Use `--model`, `--thinking`, `--max-priority`,
 `--engine-timeout-seconds`, `--stream-engine-output`, `--codex-config`, or
-`--codex-speed` to override them. The executable is resolved as `codex` on `PATH`;
-use `--codex-bin` for an explicit path. Authentication, proxy, and certificate
+`--codex-speed` to override them. Select `--engine antigravity` to use `agy` on
+`PATH`; use `--antigravity-bin` for an explicit path. Codex resolves `codex` on
+`PATH`, with `--codex-bin` for an explicit path. Authentication, proxy, and certificate
 environment variables remain supported.
 
 ### Structured output and isolation
 
-The helper supplies its JSON Schema through `--output-schema` and reads the
+For Codex, the helper supplies its JSON Schema through `--output-schema` and reads the
 final report from `--output-last-message`. It parses and validates the report
 before returning findings. Malformed output fails the review.
 
@@ -180,6 +194,37 @@ configuration to preserve authentication. File authentication is linked into the
 isolated runtime so token refreshes remain durable; trusted keyring settings and
 certificate paths are preserved without forwarding process-injection variables.
 
+Antigravity requires a CLI with `--settings` support (verified with `agy 1.5.6`).
+It runs from an empty temporary workspace with isolated HOME/XDG roots and a
+generated custom agent with default components disabled. Only `finish` (schema
+submission), `search_web`, and `read_url_content` are exposed;
+file reads/writes, shell commands, MCP, browser execution, and delegation are
+unavailable. `--no-web-search` removes both web tools, leaving bundle-only
+review with only `finish` available. Keep `finish` in the custom agent's tool
+list: `--json-schema` alone does not restore a tool excluded by that list.
+`--no-tools` is unsupported by either engine.
+
+The helper sends one NDJSON user message on stdin and passes the same review
+Schema via `--json-schema`. It requires exactly one terminal `result` with
+`status: SUCCESS` and an object in `structured_output`, then applies the shared
+report and location validation. Free-text responses never substitute for missing
+structured output. Both streaming and buffered runs use this path.
+
+User/project rules, hooks, plugins, MCP settings, and saved model preferences are
+not loaded. OS keyring authentication is retained; on macOS only
+`~/Library/Keychains` is linked into the temporary HOME. If the CLI uses its
+file-auth fallback, only `~/.gemini/antigravity-cli/antigravity-oauth-token` is
+linked (a hard link is used for file auth when symlinks are unavailable). These
+auth sources must resolve outside the reviewed repository. No
+credentials are copied into the review workspace. `GEMINI_API_KEY` selects the
+Gemini API provider when present, with `GOOGLE_GEMINI_BASE_URL` preserved for a
+custom endpoint; unrelated provider keys and process-injection
+variables are stripped. Session settings keep AI credit overage disabled.
+
+Antigravity retains a temporary conversation while running; the helper deletes
+its isolated runtime after completion. CLI flags and structured output are
+documented in the [official headless guide](https://antigravity.google/docs/cli/headless/).
+
 ## Context Efficiency
 
 Run the helper directly so target selection, engine choice, structured validation, and exit status all stay in one path. If output is noisy, summarize the completed helper output after it returns; do not ask another agent or reviewer to rerun the review.
@@ -196,6 +241,7 @@ The smoke harness has thin shell wrappers over a shared Python implementation:
 
 ```bash
 "$HOME/.agents/skills/xudong-code-review/scripts/test-review-harness" --fixture benign
+"$HOME/.agents/skills/xudong-code-review/scripts/test-review-harness" --engine antigravity --fixture benign
 ```
 
 On native Windows, invoke the extensionless Python helper through Python:
@@ -217,16 +263,16 @@ The helper:
 - otherwise uses current PR base if `gh pr view` works
 - otherwise uses `origin/main` for non-main branches
 - does not fetch automatically during branch review; the selected base ref must already resolve locally
-- supports only Codex
+- supports Codex (default) and explicit `--engine antigravity` / `--engine agy`; both Antigravity spellings resolve to the same engine and defaults
 - resolves bare `git`, `gh`, reviewer, and PowerShell shell commands from absolute `PATH` entries only, never from the reviewed checkout; explicit `--*-bin` paths are interpreted from the reviewed repository root when relative and accepted only when both the supplied path and resolved target stay outside the reviewed repository
 - use `--mode commit --commit <ref>` for already-committed work, especially clean `main` after landing
 - scans safe Git patches in full, recognizes synthetic fixture values tied to their credential field, reviews them in one pass up to the aggregate prompt limit, and automatically uses complete bounded passes above it
 - should be left in `--mode auto` or forced to `--mode branch` for PR/branch work; do not force `--mode local` after committing
 - writes only to stdout unless `--output`, `--json-output`, or live streamed engine stderr is set
 - supports `--dry-run` (validates bundle construction, reviewer CLI resolution, and local isolation startup with a version probe without contacting a provider; exits nonzero if any check fails), an opt-in per-reviewer wall-clock bound via `--engine-timeout-seconds`, `--prompt`, repo-relative `--prompt-file`, repo-relative `--dataset`, `--no-web-search`, repeatable Codex-only safe model/response tuning with `--codex-config key=value`, Codex-only `--codex-speed fast|flex|default`, and commit refs
-- supports `--stream-engine-output` for live engine text while preserving structured validation; Codex hides tool/file event details, emits compact activity summaries, and reports usage at turn completion
-- uses `gpt-6.1-sol` with `high` reasoning and no model fallback; explicit `--model` and `--thinking` values override the built-in defaults
-- gives Codex the validated bundle in an empty workspace with web search available
+- supports `--stream-engine-output` for live progress while preserving structured validation; Codex hides tool/file event details and reports usage at turn completion; Antigravity emits compact activity and terminal-status summaries
+- defaults to Codex `gpt-6.1-sol` with `high` reasoning; Antigravity defaults to `gemini-4-carbon` with `high` effort. Explicit `--model` and `--thinking` values override these defaults, without fallback
+- gives either engine the validated bundle in an empty workspace with web search available
 - prints `review still running: <engine> elapsed=<seconds>s pid=<pid>` to stderr at long-running intervals while waiting for the selected review engine, unless streamed output or compact Codex activity has been visible recently
 - prints `code-review clean: no accepted/actionable findings reported` when the selected review command exits 0
 - exits nonzero when accepted/actionable findings are present

@@ -50,9 +50,8 @@ DRAFT_REPORT = {
 
 
 class CodeReviewInterfaceTests(unittest.TestCase):
-    def test_removed_engine_and_fallback_options_are_rejected(self) -> None:
+    def test_unsupported_engine_and_fallback_options_are_rejected(self) -> None:
         options = [
-            ["--engine", "codex"],
             ["--engine", "10"],
             ["--fallback-model", "another-model"],
         ]

@@ -113,11 +113,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         prog="test-review-harness",
         description=(
             "Creates a temporary git repo with either a deliberately unsafe patch "
-            "or a security-sensitive-but-safe patch, then verifies the Codex "
+            "or a security-sensitive-but-safe patch, then verifies the selected "
             "engine through code-review."
         ),
     )
     parser.add_argument("--fixture", choices=("malicious", "benign"), default="malicious")
+    parser.add_argument("--engine", choices=("codex", "antigravity", "agy"), default="codex")
+    parser.add_argument("--model")
     return parser.parse_args(argv)
 
 
@@ -155,18 +157,22 @@ def validate_prompt_policy(repo: Path, code_review: Path) -> None:
         raise RuntimeError(f"code-review prompt missing scope policy: {missing}")
 
 
-def run_reviews(repo: Path, script_dir: Path, fixture: str) -> None:
+def run_reviews(repo: Path, script_dir: Path, fixture: str, engine: str = "codex", model: str | None = None) -> None:
     code_review = script_dir / "code-review"
     validate_prompt_policy(repo, code_review)
-    print("== codex ==", flush=True)
+    print(f"== {engine} ==", flush=True)
     command = [
         sys.executable,
         str(code_review),
+        "--engine",
+        engine,
         "--mode",
         "local",
         "--prompt",
         MALICIOUS_PROMPT if fixture == "malicious" else BENIGN_PROMPT,
     ]
+    if model:
+        command.extend(["--model", model])
     if fixture == "malicious":
         command.extend(
             [
@@ -202,7 +208,7 @@ def main(argv: list[str]) -> int:
     repo = Path(tempfile.mkdtemp(prefix="code-review-fixture."))
     try:
         create_fixture_repo(repo, args.fixture)
-        run_reviews(repo, script_dir, args.fixture)
+        run_reviews(repo, script_dir, args.fixture, args.engine, args.model)
     except subprocess.CalledProcessError as exc:
         return int(exc.returncode or 1)
     finally:

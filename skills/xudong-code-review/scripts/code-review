@@ -160,8 +160,10 @@ CODEX_TRUST_PATH_ENV_KEYS = {
     "SSL_CERT_FILE",
 }
 DEFAULT_MODEL = "gpt-6.1-sol"
+DEFAULT_ANTIGRAVITY_MODEL = "gemini-4-carbon"
 DEFAULT_THINKING = "high"
 THINKING_LEVELS = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+ANTIGRAVITY_THINKING_LEVELS = {"low", "medium", "high", "xhigh", "max"}
 SUBPROCESS_TEXT_ENCODING = "utf-8"
 SUBPROCESS_TEXT_ERRORS = "replace"
 
@@ -461,6 +463,8 @@ def safe_engine_env(
         "OPENAI_PROJECT",
     }
     engine_allowed_exact = codex_allowed_exact if engine == "codex" else set()
+    if engine == "antigravity":
+        engine_allowed_exact = {"GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL"}
     env = {
         key: value
         for key, value in os.environ.items()
@@ -492,14 +496,14 @@ def safe_engine_env(
         value = os.environ.get("CODEX_HOME")
         if value and external_env_path(repo, value):
             env["CODEX_HOME"] = value
-    if engine == "codex":
+    if engine in {"codex", "antigravity"}:
         dbus_address = os.environ.get("DBUS_SESSION_BUS_ADDRESS")
         if dbus_address and safe_dbus_session_address(repo, dbus_address):
             env["DBUS_SESSION_BUS_ADDRESS"] = dbus_address
         xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
         if xdg_runtime_dir and external_env_path(repo, xdg_runtime_dir):
             env["XDG_RUNTIME_DIR"] = xdg_runtime_dir
-        for key in CODEX_TRUST_PATH_ENV_KEYS:
+        for key in CODEX_TRUST_PATH_ENV_KEYS - ({"CODEX_CA_CERTIFICATE"} if engine == "antigravity" else set()):
             value = os.environ.get(key)
             env.pop(key, None)
             normalized = (
@@ -3319,6 +3323,190 @@ def run_codex(args: argparse.Namespace, repo: Path, prompt: str) -> str:
         output_path.unlink(missing_ok=True)
 
 
+def antigravity_runtime_env(repo: Path, runtime_root: Path, binary: str) -> dict[str, str]:
+    home = runtime_root / "home"
+    paths = {
+        "HOME": home,
+        "USERPROFILE": home,
+        "XDG_CONFIG_HOME": home / ".config",
+        "XDG_CACHE_HOME": home / ".cache",
+        "XDG_DATA_HOME": home / ".local" / "share",
+        "XDG_STATE_HOME": home / ".local" / "state",
+    }
+    for path in paths.values():
+        path.mkdir(parents=True, exist_ok=True)
+    # Google Account tokens live in the OS keyring. Never expose the source
+    # ~/.gemini tree: it also contains hooks, plugins, MCP servers and rules.
+    return safe_engine_env(
+        repo, [Path(binary).parent], engine="antigravity",
+        extra={key: str(path) for key, path in paths.items()},
+    )
+
+
+def prepare_antigravity_agent(runtime_root: Path, *, web_search: bool) -> None:
+    agents = runtime_root / "home" / ".gemini" / "config" / "agents"
+    agents.mkdir(parents=True, exist_ok=True)
+    # finish carries the schema result. Omitting it yields repeated free-text
+    # answers and SUCCESS without structured_output, even with --json-schema.
+    tools = ["finish", "search_web", "read_url_content"] if web_search else ["finish"]
+    (agents / "code-review.md").write_text(
+        "---\nname: code-review\ndescription: Review the supplied change bundle.\n"
+        f"tools: {json.dumps(tools)}\nmainAgent: true\nsubagent: false\ninheritMcp: false\n"
+        "excludeDefaultComponents: true\n"
+        "---\nReview only the supplied bundle. Return the requested JSON report.\n"
+        "Do not delegate, modify files, or invoke other reviewers.\n"
+        "Submit the final report using the finish tool and its output schema.\n",
+        encoding="utf-8",
+    )
+
+
+def prepare_antigravity_auth(repo: Path, runtime_root: Path) -> None:
+    source_home = Path.home().resolve()
+    if is_within(source_home, repo.resolve()):
+        raise SystemExit("Antigravity authentication HOME must be outside the reviewed repository")
+    home = runtime_root / "home"
+    sources = [(source_home / ".gemini/antigravity-cli/antigravity-oauth-token", home / ".gemini/antigravity-cli/antigravity-oauth-token")]
+    # The macOS keyring library resolves the login keychain relative to HOME.
+    # Link only Keychains, never Application Support or the user's config tree.
+    if sys.platform == "darwin":
+        sources.append((source_home / "Library/Keychains", home / "Library/Keychains"))
+    for source, target in sources:
+        if not source.exists():
+            continue
+        if source.name == "antigravity-oauth-token" and not source.is_file():
+            raise SystemExit("Antigravity file authentication source must be a regular file")
+        if is_within(source.resolve(), repo.resolve()):
+            raise SystemExit("Antigravity authentication source must be outside the reviewed repository")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            target.symlink_to(source, target_is_directory=source.is_dir())
+        except OSError as exc:
+            # Native Windows may not grant symlink privileges. A hard link
+            # preserves in-place file credential refresh without copying it.
+            if source.is_file():
+                try:
+                    os.link(source, target)
+                    continue
+                except OSError:
+                    pass
+            raise SystemExit("unable to link Antigravity authentication into the isolated runtime") from exc
+
+
+def antigravity_settings(args: argparse.Namespace) -> dict[str, Any]:
+    deny = ["read_file(*)", "write_file(*)", "command(*)", "unsandboxed(*)", "mcp(*)", "execute_url(*)"]
+    if not args.web_search:
+        deny.append("read_url(*)")
+    return {
+        "agentMode": "",
+        "allowNonWorkspaceAccess": False,
+        "toolPermission": "request-review",
+        "permissions": {"deny": deny, "ask": [], "allow": ["read_url(*)"] if args.web_search else []},
+        "disableSlashCommands": True,
+        "useG1Credits": False,
+        "modelProvider": "gemini" if os.environ.get("GEMINI_API_KEY") else "",
+    }
+
+
+def ensure_antigravity_isolation_supported(args: argparse.Namespace, repo: Path) -> str:
+    binary = resolve_command(args.antigravity_bin, repo)
+    with tempfile.TemporaryDirectory(prefix="code-review-agy-probe.", dir=safe_temp_root(repo)) as directory:
+        root = Path(directory)
+        workspace = root / "workspace"
+        workspace.mkdir()
+        env = antigravity_runtime_env(repo, root, binary)
+        prepare_antigravity_auth(repo, root)
+        version = run([binary, "--version"], workspace, check=False, env=env)
+        help_result = run([binary, "--help"], workspace, check=False, env=env)
+        help_text = help_result.stdout + help_result.stderr
+        required = ("--settings", "--json-schema", "--input-format", "--output-format", "--agent", "--effort", "--disable-slash-commands")
+        if version.returncode or help_result.returncode or any(flag not in help_text for flag in required):
+            raise SystemExit(
+                "Antigravity isolation preflight failed: agy must start under an isolated HOME "
+                "and support --settings, custom agents, and structured streaming output. "
+                "Update agy or use an absolute --antigravity-bin path."
+            )
+    return binary
+
+
+def extract_antigravity_report(output: str) -> str:
+    results = []
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            raise SystemExit("antigravity engine returned non-JSON streaming output") from None
+        if not isinstance(event, dict):
+            raise SystemExit("antigravity engine returned an invalid stream event")
+        if event.get("event") == "result":
+            results.append(event.get("result"))
+    if len(results) != 1 or not isinstance(results[0], dict):
+        raise SystemExit("antigravity engine must return exactly one terminal result")
+    result = results[0]
+    if result.get("status") != "SUCCESS":
+        raise SystemExit(f"antigravity engine failed: {result.get('status', 'missing status')}: {result.get('error', 'no error detail')}")
+    report = result.get("structured_output")
+    if not isinstance(report, dict):
+        raise SystemExit("antigravity engine returned no structured_output object")
+    return json.dumps(report)
+
+
+class AntigravityStreamDisplay:
+    def __init__(self) -> None:
+        self.last_visible = time.monotonic()
+
+    def __call__(self, name: str, line: str) -> str | None:
+        if name != "stdout":
+            return stream_display_escape(line)
+        try:
+            event = json.loads(line)
+        except ValueError:
+            return None
+        if isinstance(event, dict) and event.get("event") == "result":
+            result = event.get("result")
+            if isinstance(result, dict):
+                return f"antigravity result: {display_escape(str(result.get('status', 'unknown')), 80)}\n"
+        if isinstance(event, dict) and event.get("event") == "step_update" and time.monotonic() - self.last_visible >= 20:
+            self.last_visible = time.monotonic()
+            return "antigravity activity: review in progress\n"
+        # Tool arguments, file contents and partial reports stay buffered.
+        return None
+
+
+def run_antigravity(args: argparse.Namespace, repo: Path, prompt: str) -> str:
+    if not args.tools:
+        raise SystemExit("--no-tools is not supported by the Antigravity engine; use --no-web-search for bundle-only review")
+    binary = ensure_antigravity_isolation_supported(args, repo)
+    with tempfile.TemporaryDirectory(prefix="code-review-agy.", dir=safe_temp_root(repo)) as directory:
+        runtime_root = Path(directory)
+        workspace = runtime_root / "workspace"
+        workspace.mkdir()
+        env = antigravity_runtime_env(repo, runtime_root, binary)
+        prepare_antigravity_auth(repo, runtime_root)
+        prepare_antigravity_agent(runtime_root, web_search=args.web_search)
+        schema_path = runtime_root / "schema.json"
+        schema_path.write_text(json.dumps(SCHEMA), encoding="utf-8")
+        command = [
+            binary, "--agent", "code-review",
+            "--disable-slash-commands", "--settings", json.dumps(antigravity_settings(args)),
+            "--input-format", "stream-json", "--output-format", "stream-json",
+            "--json-schema", str(schema_path), "--effort", args.thinking,
+        ]
+        if args.model:
+            command.extend(["--model", args.model])
+        result = run_with_heartbeat(
+            command, workspace,
+            input_text=json.dumps({"event": "user", "message": {"content": prompt}}) + "\n",
+            label="antigravity",
+            max_runtime_seconds=getattr(args, "engine_timeout_seconds", None),
+            stream_output=args.stream_engine_output,
+            stream_display=AntigravityStreamDisplay() if args.stream_engine_output else None,
+            env=env,
+        )
+        if result.returncode:
+            raise SystemExit(f"antigravity engine failed ({result.returncode})\n{result.stderr or result.stdout}")
+        return extract_antigravity_report(result.stdout)
+
+
 class CodexStreamDisplay:
     def __init__(self, *, activity_seconds: int = 20) -> None:
         self.activity_seconds = activity_seconds
@@ -3582,19 +3770,20 @@ def positive_float(value: str) -> float:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="code-review", description="Bundle-driven Codex code review.", allow_abbrev=False)
+    parser = argparse.ArgumentParser(prog="code-review", description="Bundle-driven Codex or Antigravity code review.", allow_abbrev=False)
     parser.add_argument("--mode", choices=["auto", "local", "uncommitted", "branch", "commit"], default="auto")
     parser.add_argument("--base")
     parser.add_argument("--commit", default="HEAD")
-    parser.set_defaults(engine="codex")
-    parser.add_argument("--model", help="Codex model override. Default: gpt-6.1-sol.")
-    parser.add_argument("--thinking", choices=sorted(THINKING_LEVELS), help="Codex reasoning effort. Default: high.")
+    parser.add_argument("--engine", choices=["codex", "antigravity", "agy"], default="codex", help="Review engine. agy is an alias for antigravity.")
+    parser.add_argument("--model", help="Model override. Default: gpt-6.1-sol for Codex; gemini-4-carbon for Antigravity. Use a base model name with --thinking to select effort.")
+    parser.add_argument("--thinking", choices=sorted(THINKING_LEVELS), help="Reasoning effort. Default: high. Antigravity accepts low through max.")
     parser.add_argument(
         "--engine-timeout-seconds",
         type=positive_float,
         help="Optional wall-clock limit for each reviewer process. Disabled by default.",
     )
     parser.add_argument("--codex-bin", default="codex")
+    parser.add_argument("--antigravity-bin", default="agy")
     parser.add_argument(
         "--codex-config",
         action="append",
@@ -3605,7 +3794,7 @@ def parse_args() -> argparse.Namespace:
         choices=["fast", "flex", "default"],
         help="Codex service tier: fast (priority processing), flex, or default. Silently standard when the model catalog does not list the tier.",
     )
-    parser.add_argument("--no-tools", dest="tools", action="store_false", default=True, help="Unsupported by Codex; retained to report an explicit error.")
+    parser.add_argument("--no-tools", dest="tools", action="store_false", default=True, help="Unsupported; use --no-web-search for Antigravity bundle-only review.")
     parser.add_argument("--no-web-search", dest="web_search", action="store_false", default=True)
     parser.add_argument("--prompt", action="append", help="Additional review instruction text.")
     parser.add_argument("--prompt-file", action="append", help="Additional review instruction file.")
@@ -3621,30 +3810,37 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--stream-engine-output",
         action="store_true",
-        help="Stream review engine output while preserving buffered output for validation. Filters noisy Codex tool/status chatter.",
+        help="Show live reviewer progress while preserving buffered output for validation. Hides tool/file payloads.",
     )
     parser.add_argument("--require-finding", action="append", default=[], help="Require finding text to contain this substring.")
     parser.add_argument("--expect-findings", action="store_true", help="Treat findings as success; for harness acceptance tests.")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if args.engine == "agy":
+        args.engine = "antigravity"
     return args
 
 
 def run_engine(args: argparse.Namespace, repo: Path, prompt: str) -> str:
+    if args.engine == "antigravity":
+        return run_antigravity(args, repo, prompt)
     if args.engine != "codex":
         raise SystemExit(f"unsupported engine: {args.engine}")
     return run_codex(args, repo, prompt)
 
 
 def reviewer_args(args: argparse.Namespace) -> list[argparse.Namespace]:
-    if args.engine != "codex":
+    if args.engine not in {"codex", "antigravity"}:
         raise SystemExit(f"unsupported engine: {args.engine}")
     clone = copy.copy(args)
-    clone.model = args.model or DEFAULT_MODEL
+    clone.model = args.model or (DEFAULT_MODEL if args.engine == "codex" else DEFAULT_ANTIGRAVITY_MODEL)
     clone.thinking = args.thinking or DEFAULT_THINKING
-    if clone.thinking not in THINKING_LEVELS:
-        valid = ", ".join(sorted(THINKING_LEVELS))
-        raise SystemExit(f"invalid thinking level for codex: {clone.thinking} (valid: {valid})")
+    levels = THINKING_LEVELS if args.engine == "codex" else ANTIGRAVITY_THINKING_LEVELS
+    if clone.thinking not in levels:
+        valid = ", ".join(sorted(levels))
+        raise SystemExit(f"invalid thinking level for {args.engine}: {clone.thinking} (valid: {valid})")
+    if args.engine == "antigravity" and (getattr(args, "codex_config", None) or getattr(args, "codex_speed", None)):
+        raise SystemExit("--codex-config and --codex-speed require --engine codex")
     return [clone]
 
 
@@ -3658,7 +3854,15 @@ def reviewer_label(args: argparse.Namespace) -> str:
 
 
 def resolve_engine_binary(reviewer: argparse.Namespace, repo: Path) -> tuple[bool, str | None]:
-    """Check the Codex binary, isolated startup, and tuning without a provider call."""
+    """Check the reviewer binary, isolated startup, and tuning without a provider call."""
+    if reviewer.engine == "antigravity":
+        if not getattr(reviewer, "tools", True):
+            return False, "--no-tools is not supported by the Antigravity engine"
+        try:
+            ensure_antigravity_isolation_supported(reviewer, repo)
+        except SystemExit as exc:
+            return False, str(exc.code)
+        return True, None
     if reviewer.engine != "codex":
         return False, f"unsupported engine: {reviewer.engine}"
     if not getattr(reviewer, "tools", True):
