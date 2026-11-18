@@ -76,7 +76,7 @@ class CodeReviewInterfaceTests(unittest.TestCase):
             "CODEX_BIN": "/unexpected/codex",
         }
         for flags, expected in (
-            ([], ("gpt-6.1-sol", "high", "P2", None, False, "codex", [], None)),
+            ([], (CODE_REVIEW.DEFAULT_MODEL, CODE_REVIEW.DEFAULT_THINKING, "P2", None, False, "codex", [], None)),
             (["--model", "custom-model", "--thinking", "low", "--max-priority", "P1",
               "--engine-timeout-seconds", "30", "--stream-engine-output",
               "--codex-bin", "/explicit/codex", "--codex-config", 'model_verbosity="low"',
@@ -260,18 +260,18 @@ class CodeReviewCompatibilityTests(unittest.TestCase):
 
     def test_codex_surfaces_provider_failures_without_model_fallback(self) -> None:
         for message in (
-            "The model `gpt-6.1-sol` does not exist or you do not have access to it.",
+            f"The model `{CODE_REVIEW.DEFAULT_MODEL}` does not exist or you do not have access to it.",
             "network timeout",
-            "model_not_available: gpt-6.1-sol is temporarily unavailable due to capacity",
+            f"model_not_available: {CODE_REVIEW.DEFAULT_MODEL} is temporarily unavailable due to capacity",
         ):
             with self.subTest(message=message):
                 args = argparse.Namespace(
                     codex_bin="codex",
                     codex_config=None,
                     codex_speed=None,
-                    model="gpt-6.1-sol",
+                    model=CODE_REVIEW.DEFAULT_MODEL,
                     stream_engine_output=False,
-                    thinking="high",
+                    thinking=CODE_REVIEW.DEFAULT_THINKING,
                     tools=True,
                     web_search=False,
                 )
@@ -308,16 +308,16 @@ class CodeReviewCompatibilityTests(unittest.TestCase):
                         CODE_REVIEW.run_codex(args, Path(tmpdir), "review")
 
                 self.assertIn(message, str(error.exception))
-                self.assertEqual(models, ["gpt-6.1-sol"])
+                self.assertEqual(models, [CODE_REVIEW.DEFAULT_MODEL])
 
     def test_codex_runs_outside_repo_with_bundle_only_workspace(self) -> None:
         args = argparse.Namespace(
             codex_bin="codex",
             codex_config=None,
             codex_speed=None,
-            model="gpt-6.1-sol",
+            model=CODE_REVIEW.DEFAULT_MODEL,
             stream_engine_output=False,
-            thinking="high",
+            thinking=CODE_REVIEW.DEFAULT_THINKING,
             tools=True,
             web_search=False,
         )

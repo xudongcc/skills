@@ -159,7 +159,7 @@ CODEX_TRUST_PATH_ENV_KEYS = {
     "SSL_CERT_DIR",
     "SSL_CERT_FILE",
 }
-DEFAULT_MODEL = "gpt-6.1-sol"
+DEFAULT_MODEL = "gpt-6.2-sol"
 DEFAULT_ANTIGRAVITY_MODEL = "gemini-4-carbon"
 DEFAULT_THINKING = "high"
 THINKING_LEVELS = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
@@ -3775,8 +3775,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base")
     parser.add_argument("--commit", default="HEAD")
     parser.add_argument("--engine", choices=["codex", "antigravity", "agy"], default="codex", help="Review engine. agy is an alias for antigravity.")
-    parser.add_argument("--model", help="Model override. Default: gpt-6.1-sol for Codex; gemini-4-carbon for Antigravity. Use a base model name with --thinking to select effort.")
-    parser.add_argument("--thinking", choices=sorted(THINKING_LEVELS), help="Reasoning effort. Default: high. Antigravity accepts low through max.")
+    parser.add_argument("--model", help="Override the selected engine's default model. Use --thinking to select effort separately.")
+    parser.add_argument("--thinking", choices=sorted(THINKING_LEVELS), help="Override the selected engine's default reasoning effort. The engine and model must support the requested level.")
     parser.add_argument(
         "--engine-timeout-seconds",
         type=positive_float,
