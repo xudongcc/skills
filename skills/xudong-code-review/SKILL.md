@@ -7,7 +7,7 @@ description: "Structured code review with Codex or Antigravity CLI when explicit
 
 Run the bundled structured review helper only when the user explicitly asks for xudong-code-review, a Codex review, or an Antigravity review.
 
-Codex is the default engine, using `gpt-6.1-sol` with `high` reasoning. Select Antigravity explicitly with `--engine antigravity` or its alias `--engine agy`; it uses `agy` with `gemini-4-carbon` and `high` effort by default. Neither engine has a model fallback.
+Codex is the default engine. Select Antigravity explicitly with `--engine antigravity` or its alias `--engine agy`. Use the helper defaults unless the user requests an override. Neither engine has a model fallback.
 
 Do not invoke Xudong Code Review automatically before a commit, push, PR, merge, deploy, or final reply. Repository or workflow rules may call it only when they explicitly name it.
 
@@ -131,29 +131,27 @@ independently semantic artifacts merely to shrink the review.
 
 ## Model and reasoning
 
-Select `--engine codex` (default), `--engine antigravity`, or its alias `--engine agy`. Codex defaults to
-`gpt-6.1-sol`, with `high` reasoning. Antigravity defaults to `gemini-4-carbon`
-with `high` effort; run `agy models` to list available models and use `--model`
-to override the model. Use `--thinking` to override effort. Prefer a base model
-name such as `gemini-4-carbon` rather than an effort-suffixed variant, because
-the helper passes effort separately through `--effort`. There is no
+Select `--engine codex` (default), `--engine antigravity`, or its alias `--engine agy`.
+Omit `--model` and `--thinking` to use the helper defaults. Use these flags only
+when an override is requested. For Antigravity, run `agy models` to list available
+models and use a base model name because the helper passes effort separately
+through `--effort`. There is no
 automatic engine/model fallback or `--fallback-model` option.
 Access, capacity, rate-limit, and network failures are returned directly.
 
-Codex reasoning levels: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`,
-passed through `model_reasoning_effort`. Antigravity accepts `low`, `medium`,
-`high`, `xhigh`, `max`, passed through `--effort`; the selected model must support
-the requested effort.
+Use `--help` to inspect the accepted reasoning levels. Codex passes reasoning
+through `model_reasoning_effort`; Antigravity passes it through `--effort`.
+The selected engine and model must support the requested effort.
 
 ```bash
-"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --model gpt-6.1-sol --thinking high
+"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --mode local
 "$HOME/.agents/skills/xudong-code-review/scripts/code-review" --codex-speed fast
 "$HOME/.agents/skills/xudong-code-review/scripts/code-review" --codex-config 'model_verbosity="low"'
 
 # Antigravity (authenticate once with interactive agy first):
 "$HOME/.agents/skills/xudong-code-review/scripts/code-review" --engine antigravity --mode local
 "$HOME/.agents/skills/xudong-code-review/scripts/code-review" --engine agy --mode local
-"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --engine antigravity --model gemini-4-carbon --thinking high --mode branch --base origin/main
+"$HOME/.agents/skills/xudong-code-review/scripts/code-review" --engine antigravity --mode branch --base origin/main
 ```
 
 `--codex-speed` accepts `fast`, `flex`, and `default`; the selected model must
@@ -164,10 +162,10 @@ Both Codex tuning options are rejected with `--engine antigravity`.
 ### Configuration
 
 Review settings use fixed defaults and explicit CLI flags; configuration environment
-variables and repository configuration files are not loaded. Default models are
-`gpt-6.1-sol` for Codex and `gemini-4-carbon` for Antigravity. Both use `high`
-reasoning, P0 through P2 findings, no timeout, and no streamed
-engine output. Use `--model`, `--thinking`, `--max-priority`,
+variables and repository configuration files are not loaded. Model and reasoning defaults are
+owned by the constants in `scripts/code-review`; do not duplicate them here or
+pass explicit values merely to reproduce defaults. Both engines use P0 through
+P2 findings, no timeout, and no streamed engine output. Use `--model`, `--thinking`, `--max-priority`,
 `--engine-timeout-seconds`, `--stream-engine-output`, `--codex-config`, or
 `--codex-speed` to override them. Select `--engine antigravity` to use `agy` on
 `PATH`; use `--antigravity-bin` for an explicit path. Codex resolves `codex` on
@@ -271,7 +269,7 @@ The helper:
 - writes only to stdout unless `--output`, `--json-output`, or live streamed engine stderr is set
 - supports `--dry-run` (validates bundle construction, reviewer CLI resolution, and local isolation startup with a version probe without contacting a provider; exits nonzero if any check fails), an opt-in per-reviewer wall-clock bound via `--engine-timeout-seconds`, `--prompt`, repo-relative `--prompt-file`, repo-relative `--dataset`, `--no-web-search`, repeatable Codex-only safe model/response tuning with `--codex-config key=value`, Codex-only `--codex-speed fast|flex|default`, and commit refs
 - supports `--stream-engine-output` for live progress while preserving structured validation; Codex hides tool/file event details and reports usage at turn completion; Antigravity emits compact activity and terminal-status summaries
-- defaults to Codex `gpt-6.1-sol` with `high` reasoning; Antigravity defaults to `gemini-4-carbon` with `high` effort. Explicit `--model` and `--thinking` values override these defaults, without fallback
+- applies the model and reasoning defaults defined in the helper; explicit `--model` and `--thinking` values override them, without fallback
 - gives either engine the validated bundle in an empty workspace with web search available
 - prints `review still running: <engine> elapsed=<seconds>s pid=<pid>` to stderr at long-running intervals while waiting for the selected review engine, unless streamed output or compact Codex activity has been visible recently
 - prints `code-review clean: no accepted/actionable findings reported` when the selected review command exits 0

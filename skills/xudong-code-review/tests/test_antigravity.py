@@ -31,11 +31,11 @@ def result_stream(report: object = FINAL_REPORT, status: str = "SUCCESS") -> str
 class AntigravityTests(unittest.TestCase):
     def test_engine_defaults_and_explicit_overrides(self) -> None:
         codex = parse()
-        self.assertEqual((codex.engine, codex.model, codex.thinking), ("codex", "gpt-6.1-sol", "high"))
+        self.assertEqual((codex.engine, codex.model, codex.thinking), ("codex", helper.DEFAULT_MODEL, helper.DEFAULT_THINKING))
         agy = parse("--engine", "antigravity")
-        self.assertEqual((agy.engine, agy.model, agy.thinking, agy.antigravity_bin), ("antigravity", "gemini-4-carbon", "high", "agy"))
+        self.assertEqual((agy.engine, agy.model, agy.thinking, agy.antigravity_bin), ("antigravity", helper.DEFAULT_ANTIGRAVITY_MODEL, helper.DEFAULT_THINKING, "agy"))
         agy = parse("--engine", "antigravity", "--thinking", "low")
-        self.assertEqual((agy.model, agy.thinking), ("gemini-4-carbon", "low"))
+        self.assertEqual((agy.model, agy.thinking), (helper.DEFAULT_ANTIGRAVITY_MODEL, "low"))
         agy = parse("--engine", "antigravity", "--model", "custom-model", "--thinking", "max", "--antigravity-bin", "/trusted/agy")
         self.assertEqual((agy.model, agy.thinking, agy.antigravity_bin), ("custom-model", "max", "/trusted/agy"))
 
