@@ -160,7 +160,7 @@ CODEX_TRUST_PATH_ENV_KEYS = {
     "SSL_CERT_FILE",
 }
 DEFAULT_MODEL = "gpt-6.2-sol"
-DEFAULT_ANTIGRAVITY_MODEL = "gemini-4-carbon"
+DEFAULT_ANTIGRAVITY_MODEL = "gemini-4-neon"
 DEFAULT_THINKING = "high"
 THINKING_LEVELS = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 ANTIGRAVITY_THINKING_LEVELS = {"low", "medium", "high", "xhigh", "max"}
